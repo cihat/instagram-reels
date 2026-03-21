@@ -10,7 +10,7 @@ import {
 } from "@/lib/media-url"
 import type { MediaItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { Bookmark, Calendar, Heart } from "lucide-react"
+import { Bookmark, Calendar, Heart, Volume2, VolumeX } from "lucide-react"
 import { useEffect, useRef, useState, type CSSProperties } from "react"
 
 interface MediaCardProps {
@@ -58,12 +58,15 @@ const mediaFrameClass =
 const mediaFitClass =
 	"absolute inset-0 h-full w-full object-contain object-center"
 
+/** Compact glass-style controls on the media frame (bookmark + sound). */
+const mediaChromeButtonClass =
+	"z-[4] flex size-7 cursor-pointer items-center justify-center rounded-full border border-border/40 bg-background/30 text-foreground shadow-sm backdrop-blur-md transition-[background-color,box-shadow] hover:bg-background/45 hover:shadow-md active:scale-95"
+
 function shouldIgnoreCardClick(target: EventTarget | null): boolean {
 	if (!(target instanceof HTMLElement)) return false
 	return Boolean(
 		target.closest("a[href]") ||
-			target.closest("video") ||
-			target.closest("button") ||
+			target.closest("[data-prevent-card-open]") ||
 			target.closest('[role="slider"]'),
 	)
 }
@@ -101,8 +104,10 @@ export function MediaCard({
 		(rawThumb.length > 0 ? rawThumb : undefined)
 
 	const [videoSurfaceReady, setVideoSurfaceReady] = useState(false)
+	const [gridSoundOn, setGridSoundOn] = useState(false)
 	useEffect(() => {
 		setVideoSurfaceReady(false)
+		setGridSoundOn(false)
 	}, [item.id])
 
 	// Keep aspect ratio fixed from index metadata only — using decoded video dimensions
@@ -116,18 +121,8 @@ export function MediaCard({
 	})
 
 	const videoRef = useRef<HTMLVideoElement>(null)
+	const wasInViewRef = useRef(false)
 	const { playingId, setPlayingId } = usePlayingVideo()
-
-	useEffect(() => {
-		if (
-			playingId !== null &&
-			playingId !== item.id &&
-			videoRef.current &&
-			!videoRef.current.paused
-		) {
-			videoRef.current.pause()
-		}
-	}, [playingId, item.id])
 
 	useEffect(() => {
 		if (!gridVideoSuspended) return
@@ -138,11 +133,41 @@ export function MediaCard({
 	}, [gridVideoSuspended, playingId, item.id, setPlayingId])
 
 	useEffect(() => {
-		if (!inView && hasVideo && videoRef.current && !videoRef.current.paused) {
-			videoRef.current.pause()
-			if (playingId === item.id) setPlayingId(null)
+		if (!hasVideo || !videoRef.current) {
+			wasInViewRef.current = inView
+			return
+		}
+		const v = videoRef.current
+		const leftView = wasInViewRef.current && !inView
+		wasInViewRef.current = inView
+		if (!inView) {
+			if (!v.paused) {
+				v.pause()
+				if (playingId === item.id) setPlayingId(null)
+			}
+			if (leftView) {
+				v.muted = true
+				setGridSoundOn(false)
+			}
 		}
 	}, [inView, hasVideo, playingId, item.id, setPlayingId])
+
+	/** Autoplay in view; muted unless user turned sound on for this tile. */
+	useEffect(() => {
+		if (!hasVideo || !inView || gridVideoSuspended) return
+		const v = videoRef.current
+		if (!v) return
+		v.muted = !gridSoundOn
+		if (gridSoundOn) v.volume = 1
+		void v.play().catch(() => {})
+	}, [
+		hasVideo,
+		inView,
+		gridVideoSuspended,
+		item.id,
+		item.video_url,
+		gridSoundOn,
+	])
 
 	const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
 		if (shouldIgnoreCardClick(e.target)) return
@@ -178,8 +203,10 @@ export function MediaCard({
 					{onToggleBookmark ? (
 						<button
 							type="button"
+							data-prevent-card-open
 							className={cn(
-								"absolute right-2 top-2 z-[4] flex size-9 items-center justify-center rounded-full border border-border/70 bg-background/90 text-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-background",
+								"absolute right-1.5 top-1.5",
+								mediaChromeButtonClass,
 								isBookmarked && "text-amber-600",
 							)}
 							title={
@@ -196,7 +223,7 @@ export function MediaCard({
 							}}
 						>
 							<Bookmark
-								className={cn("size-4", isBookmarked && "fill-amber-400")}
+								className={cn("size-3.5", isBookmarked && "fill-amber-400")}
 								strokeWidth={2}
 							/>
 						</button>
@@ -219,7 +246,9 @@ export function MediaCard({
 								poster={thumbForLayer ? undefined : posterAttr}
 								width={videoWidthAttr}
 								height={videoHeightAttr}
-								controls
+								autoPlay
+								muted={!gridSoundOn}
+								loop
 								preload={inView ? "metadata" : "none"}
 								playsInline
 								onLoadedData={() => setVideoSurfaceReady(true)}
@@ -262,6 +291,38 @@ export function MediaCard({
 									}}
 								/>
 							) : null}
+							<button
+								type="button"
+								data-prevent-card-open
+								className={cn(
+									"absolute bottom-1.5 right-1.5",
+									mediaChromeButtonClass,
+									gridSoundOn && "text-primary",
+								)}
+								title={gridSoundOn ? "Mute" : "Unmute"}
+								aria-label={gridSoundOn ? "Mute video" : "Unmute video"}
+								aria-pressed={gridSoundOn}
+								onClick={(e) => {
+									e.preventDefault()
+									e.stopPropagation()
+									setGridSoundOn((on) => {
+										const next = !on
+										const v = videoRef.current
+										if (v) {
+											v.muted = !next
+											if (next) v.volume = 1
+											void v.play().catch(() => {})
+										}
+										return next
+									})
+								}}
+							>
+								{gridSoundOn ? (
+									<Volume2 className="size-3.5" strokeWidth={2} />
+								) : (
+									<VolumeX className="size-3.5" strokeWidth={2} />
+								)}
+							</button>
 						</div>
 					) : rawThumb ? (
 						<div className={cn(mediaFrameClass, "block")} style={frameStyle}>

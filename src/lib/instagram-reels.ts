@@ -166,6 +166,107 @@ function takenAtFromNode(node: Record<string, unknown>): string {
 	return ""
 }
 
+function takenAtMsFromNode(node: Record<string, unknown>): number | null {
+	const t = node.taken_at ?? node.taken_at_timestamp
+	if (typeof t === "number") return t * 1000
+	return null
+}
+
+/** `post_date` is UTC `toISOString` without `Z` */
+function postDateStringToMs(postDate: string): number | null {
+	const t = postDate.trim()
+	if (!t) return null
+	const normalized = t.includes("T") ? t : t.replace(" ", "T")
+	const withZ = /[zZ]|[+-]\d{2}:?\d{2}$/.test(normalized)
+		? normalized
+		: `${normalized}Z`
+	const ms = Date.parse(withZ)
+	return Number.isFinite(ms) ? ms : null
+}
+
+/** Inclusive bounds, UTC epoch ms (same basis as `post_date`). */
+export type FetchReelsDateRangeMs = { since?: number; until?: number }
+
+function mediaItemInDateRange(
+	item: MediaItem,
+	range: FetchReelsDateRangeMs,
+): boolean {
+	const ms = postDateStringToMs(item.post_date)
+	if (ms === null) return false
+	if (range.since !== undefined && ms < range.since) return false
+	if (range.until !== undefined && ms > range.until) return false
+	return true
+}
+
+function clipsRootPaging(root: Record<string, unknown>): {
+	nextMaxId?: string
+	moreAvailable: boolean
+} {
+	const pi = root.paging_info as Record<string, unknown> | undefined
+	let nextMaxId: string | undefined
+	if (pi) {
+		const c = pi.max_id ?? pi.next_max_id
+		if (typeof c === "string" && c.length > 0) nextMaxId = c
+	}
+	if (!nextMaxId) {
+		for (const k of ["next_max_id", "max_id"] as const) {
+			const v = root[k]
+			if (typeof v === "string" && v.length > 0) {
+				nextMaxId = v
+				break
+			}
+		}
+	}
+	let moreAvailable = false
+	if (typeof pi?.more_available === "boolean") moreAvailable = pi.more_available
+	else if (typeof root.more_available === "boolean")
+		moreAvailable = root.more_available
+	else moreAvailable = Boolean(nextMaxId)
+	return { nextMaxId, moreAvailable }
+}
+
+/** Oldest `taken_at` in a clips/user `items` page (newest-first order). */
+function oldestTakenAtMsInClipsRoot(root: Record<string, unknown>): number | null {
+	const rows = root.items as unknown[] | undefined
+	if (!Array.isArray(rows)) return null
+	let min: number | null = null
+	for (const row of rows) {
+		const media = (row as Record<string, unknown>).media as
+			| Record<string, unknown>
+			| undefined
+		if (!media) continue
+		const ms = takenAtMsFromNode(media)
+		if (ms != null && (min === null || ms < min)) min = ms
+	}
+	return min
+}
+
+function parseClipsUserItemsFromRoot(
+	root: Record<string, unknown>,
+	username: string,
+	fullname: string,
+): MediaItem[] {
+	const out: MediaItem[] = []
+	const rows = root.items as unknown[] | undefined
+	if (Array.isArray(rows)) {
+		for (const row of rows) {
+			const r = row as Record<string, unknown>
+			const media = r.media as Record<string, unknown> | undefined
+			if (media) {
+				const item = nodeToMediaItem(media, username, fullname)
+				if (item) out.push(item)
+			}
+		}
+	}
+	if (out.length === 0) {
+		for (const node of collectMediaNodes(root, 200)) {
+			const item = nodeToMediaItem(node, username, fullname)
+			if (item) out.push(item)
+		}
+	}
+	return dedupeByShortcode(out)
+}
+
 function isVideoLikeNode(node: Record<string, unknown>): boolean {
 	if (node.is_video === true) return true
 	if (node.__typename === "GraphVideo") return true
@@ -304,6 +405,24 @@ function extractUserId(user: Record<string, unknown>): string | undefined {
 	return undefined
 }
 
+async function fetchClipsUserPageJson(
+	userId: string,
+	cookie: string,
+	referer: string,
+	maxId?: string,
+): Promise<Record<string, unknown>> {
+	const q = new URLSearchParams({
+		include_feed_video: "true",
+		page_size: "24",
+		target_user_id: userId,
+	})
+	if (maxId) q.set("max_id", maxId)
+	const url = `https://www.instagram.com/api/v1/clips/user/?${q.toString()}`
+	const json = await fetchInstagramJson(url, cookie, referer)
+	checkIgApiJson(json)
+	return json as Record<string, unknown>
+}
+
 async function itemsFromClipsApi(
 	userId: string,
 	username: string,
@@ -311,34 +430,37 @@ async function itemsFromClipsApi(
 	cookie: string,
 	referer: string,
 ): Promise<MediaItem[]> {
-	const q = new URLSearchParams({
-		include_feed_video: "true",
-		page_size: "24",
-		target_user_id: userId,
-	})
-	const url = `https://www.instagram.com/api/v1/clips/user/?${q.toString()}`
-	const json = await fetchInstagramJson(url, cookie, referer)
-	checkIgApiJson(json)
-	const out: MediaItem[] = []
-	const root = json as Record<string, unknown>
-	const rows = root.items as unknown[] | undefined
-	if (Array.isArray(rows)) {
-		for (const row of rows) {
-			const r = row as Record<string, unknown>
-			const media = r.media as Record<string, unknown> | undefined
-			if (media) {
-				const item = nodeToMediaItem(media, username, fullname)
-				if (item) out.push(item)
-			}
-		}
+	const root = await fetchClipsUserPageJson(userId, cookie, referer)
+	return parseClipsUserItemsFromRoot(root, username, fullname)
+}
+
+async function itemsFromClipsApiPaginated(
+	userId: string,
+	username: string,
+	fullname: string,
+	cookie: string,
+	referer: string,
+	range: FetchReelsDateRangeMs,
+	maxPages: number,
+	onPageItems: (items: MediaItem[]) => void,
+	shouldStopAfterPage: (root: Record<string, unknown>) => boolean,
+): Promise<void> {
+	let maxId: string | undefined
+	for (let page = 0; page < maxPages; page++) {
+		const root = await fetchClipsUserPageJson(
+			userId,
+			cookie,
+			referer,
+			maxId,
+		)
+		const batch = parseClipsUserItemsFromRoot(root, username, fullname)
+		onPageItems(batch)
+		if (shouldStopAfterPage(root)) return
+		const { nextMaxId, moreAvailable } = clipsRootPaging(root)
+		if (!moreAvailable || !nextMaxId) return
+		maxId = nextMaxId
+		await new Promise((r) => setTimeout(r, 400))
 	}
-	if (out.length === 0) {
-		for (const node of collectMediaNodes(json, 200)) {
-			const item = nodeToMediaItem(node, username, fullname)
-			if (item) out.push(item)
-		}
-	}
-	return dedupeByShortcode(out)
 }
 
 function nodeToMediaItem(
@@ -509,15 +631,26 @@ async function fetchHtmlWithRetries(
 	throw last
 }
 
+export type FetchReelsForUserOptions = {
+	perUserShortcodeCap?: number
+	/** UTC epoch ms; inclusive. When set, only matching items are kept and clips/user is paginated. */
+	dateRangeMs?: FetchReelsDateRangeMs
+	/** Max clips/user API pages when `dateRangeMs` is set (default 20). */
+	maxClipsPages?: number
+}
+
 /**
  * Collects items for one user from /reels/ and, if needed, individual /reel/{shortcode}/ pages.
  */
 export async function fetchReelsForUser(
 	username: string,
 	cookie: string,
-	options?: { perUserShortcodeCap?: number },
+	options?: FetchReelsForUserOptions,
 ): Promise<{ items: MediaItem[]; warnings: string[] }> {
-	const cap = options?.perUserShortcodeCap ?? 24
+	const range = options?.dateRangeMs
+	const cap =
+		options?.perUserShortcodeCap ?? (range !== undefined ? 500 : 24)
+	const maxClipsPages = options?.maxClipsPages ?? 20
 	const warnings: string[] = []
 	const items: MediaItem[] = []
 	const seenShort = new Set<string>()
@@ -527,6 +660,7 @@ export async function fetchReelsForUser(
 	const profileReferer = profileUrl
 
 	const pushItem = (item: MediaItem) => {
+		if (range !== undefined && !mediaItemInDateRange(item, range)) return
 		if (seenShort.has(item.shortcode)) return
 		if (items.length >= cap) return
 		seenShort.add(item.shortcode)
@@ -557,14 +691,34 @@ export async function fetchReelsForUser(
 
 		if (uid && items.length < cap) {
 			try {
-				const fromClips = await itemsFromClipsApi(
-					uid,
-					username,
-					fullname,
-					cookie,
-					reelsUrl,
-				)
-				for (const it of fromClips) pushItem(it)
+				if (range !== undefined) {
+					await itemsFromClipsApiPaginated(
+						uid,
+						username,
+						fullname,
+						cookie,
+						reelsUrl,
+						range,
+						maxClipsPages,
+						(batch) => {
+							for (const it of batch) pushItem(it)
+						},
+						(root) => {
+							if (range.since === undefined) return false
+							const oldest = oldestTakenAtMsInClipsRoot(root)
+							return oldest !== null && oldest < range.since
+						},
+					)
+				} else {
+					const fromClips = await itemsFromClipsApi(
+						uid,
+						username,
+						fullname,
+						cookie,
+						reelsUrl,
+					)
+					for (const it of fromClips) pushItem(it)
+				}
 			} catch (e) {
 				warnings.push(
 					`${username}: ${humanizeInstagramFetchDetail(formatFetchError(e))}`,

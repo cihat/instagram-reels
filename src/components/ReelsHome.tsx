@@ -895,6 +895,10 @@ export function ReelsHome() {
 							canGoNext={detailIndex < sortedFull.length - 1}
 							onGoPrev={goDetailPrev}
 							onGoNext={goDetailNext}
+							isBookmarked={isBookmarkedMediaId(
+								sortedFull[detailIndex].id,
+							)}
+							onToggleBookmark={toggleBookmarkMediaId}
 						/>
 					) : null}
 
