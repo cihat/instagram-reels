@@ -18,6 +18,7 @@ import { AccountFilterBar } from "@/components/AccountFilterBar"
 import { AccountOrganizeModal } from "@/components/AccountOrganizeModal"
 import { CategoryAccountsModal } from "@/components/CategoryAccountsModal"
 import { MediaCard } from "@/components/MediaCard"
+import { PostDetailDialog } from "@/components/PostDetailDialog"
 import { useCategoryFilter } from "@/contexts/CategoryFilterContext"
 import { PlayingVideoProvider } from "@/contexts/PlayingVideoContext"
 import { ReelsScrollRootContext } from "@/contexts/ReelsScrollRootContext"
@@ -31,10 +32,12 @@ import { computeUnassignedUsernames } from "@/lib/category-account-assignment"
 import { enqueueMetadataFetchToast } from "@/lib/metadata-fetch-toast"
 import {
 	ALL_VIDEOS_INDEX_EDITOR_ID,
+	BOOKMARKS_VIEW_ID,
 	OTHER_CATEGORY_ID,
 } from "@/lib/reel-categories"
 import {
 	getFilterOptions,
+	getMediaItemsByIds,
 	isIndexLoaded,
 	loadIndex,
 	normalizeForSearch,
@@ -200,6 +203,9 @@ export function ReelsHome() {
 		hideCustomCategory,
 		isBuiltinCategory,
 		getCategoryLabel,
+		bookmarkMediaIds,
+		toggleBookmarkMediaId,
+		isBookmarkedMediaId,
 	} = useCategoryFilter()
 
 	const [loading, setLoading] = useState(true)
@@ -219,6 +225,7 @@ export function ReelsHome() {
 		}
 	}
 	const [orderOpen, setOrderOpen] = useState(false)
+	const [detailIndex, setDetailIndex] = useState<number | null>(null)
 	const [categorySettingsOpen, setCategorySettingsOpen] = useState(false)
 	const [headerSettingsCategoryId, setHeaderSettingsCategoryId] = useState<
 		string | null
@@ -248,6 +255,7 @@ export function ReelsHome() {
 	const categoryAccounts = useMemo(() => {
 		if (!selectedCategory) return null
 		if (selectedCategory === OTHER_CATEGORY_ID) return otherCategoryAccounts
+		if (selectedCategory === BOOKMARKS_VIEW_ID) return null
 		return getEffectiveAccounts(selectedCategory)
 	}, [
 		selectedCategory,
@@ -265,9 +273,25 @@ export function ReelsHome() {
 
 	const accountUsernames = useMemo(() => {
 		if (loading || !isIndexLoaded()) return []
+		if (selectedCategory === BOOKMARKS_VIEW_ID) {
+			const items = getMediaItemsByIds(bookmarkMediaIds)
+			const users = [
+				...new Set(items.map((i) => i.username).filter(Boolean)),
+			]
+			return users.sort((a, b) =>
+				a.localeCompare(b, "en", { sensitivity: "base" }),
+			)
+		}
 		if (categoryAccounts != null) return categoryAccounts
 		return getEffectiveAccounts(ALL_VIDEOS_INDEX_EDITOR_ID)
-	}, [loading, categoryAccounts, getEffectiveAccounts, indexEpoch])
+	}, [
+		loading,
+		categoryAccounts,
+		getEffectiveAccounts,
+		indexEpoch,
+		selectedCategory,
+		bookmarkMediaIds,
+	])
 
 	const replaceSearchResults = useCallback(() => {
 		setVisibleCount(REELS_PAGE_INITIAL)
@@ -277,6 +301,44 @@ export function ReelsHome() {
 			return
 		}
 		const q = queryRef.current.trim() || undefined
+
+		if (selectedCategory === BOOKMARKS_VIEW_ID) {
+			let base = getMediaItemsByIds(bookmarkMediaIds)
+			if (q) {
+				const qHit = new Set(search({ q }).map((i) => i.id))
+				base = base.filter((i) => qHit.has(i.id))
+			}
+			const countMap = new Map<string, number>()
+			for (const item of base) {
+				const k = normalizeForSearch(item.username)
+				countMap.set(k, (countMap.get(k) ?? 0) + 1)
+			}
+			const counts: Record<string, number> = {}
+			for (const u of accountUsernames) {
+				counts[u] = countMap.get(normalizeForSearch(u)) ?? 0
+			}
+			setReelCountByAccount(counts)
+
+			const allowed = new Set(
+				base.map((i) => normalizeForSearch(i.username)),
+			)
+			const picked = accountsRef.current.filter((u) =>
+				allowed.has(normalizeForSearch(u)),
+			)
+			const usernames = picked.length > 0 ? picked : [...new Set(base.map((i) => i.username))]
+			if (usernames.length === 0) {
+				setResults(base)
+				return
+			}
+			const uSet = new Set(
+				usernames.map((u) => normalizeForSearch(u)),
+			)
+			setResults(
+				base.filter((i) => uSet.has(normalizeForSearch(i.username))),
+			)
+			return
+		}
+
 		const cat = selectedCategory
 			? selectedCategory === OTHER_CATEGORY_ID
 				? otherCategoryAccounts
@@ -307,7 +369,13 @@ export function ReelsHome() {
 		)
 		const usernames = picked.length > 0 ? picked : cat
 		setResults(search({ q, usernames }))
-	}, [selectedCategory, getEffectiveAccounts, otherCategoryAccounts, accountUsernames])
+	}, [
+		selectedCategory,
+		getEffectiveAccounts,
+		otherCategoryAccounts,
+		accountUsernames,
+		bookmarkMediaIds,
+	])
 
 	const runSourcesSubmitInBackground = (payload: {
 		accounts: string[]
@@ -341,6 +409,24 @@ export function ReelsHome() {
 
 	const sortedFullRef = useRef(sortedFull)
 	sortedFullRef.current = sortedFull
+
+	useEffect(() => {
+		if (detailIndex !== null && detailIndex >= sortedFull.length) {
+			setDetailIndex(null)
+		}
+	}, [detailIndex, sortedFull.length])
+
+	const goDetailPrev = useCallback(() => {
+		setDetailIndex((i) => (i != null && i > 0 ? i - 1 : i))
+	}, [])
+
+	const goDetailNext = useCallback(() => {
+		setDetailIndex((i) => {
+			if (i == null) return i
+			const last = sortedFullRef.current.length - 1
+			return i < last ? i + 1 : i
+		})
+	}, [])
 	const visibleCountRef = useRef(visibleCount)
 	visibleCountRef.current = visibleCount
 
@@ -584,6 +670,7 @@ export function ReelsHome() {
 	}, [selectedCategory, getCategoryLabel])
 
 	const openHeaderSettings = useCallback(() => {
+		if (selectedCategory === BOOKMARKS_VIEW_ID) return
 		if (!selectedCategory) {
 			setHeaderSettingsCategoryId(ALL_VIDEOS_INDEX_EDITOR_ID)
 			setCategorySettingsOpen(true)
@@ -614,17 +701,19 @@ export function ReelsHome() {
 	const headerTrailing = (
 		<div className="flex shrink-0 items-center gap-1">
 			{!(isNarrowViewport && mobileSearchOpen) && sortMobileButton}
-			<Button
-				type="button"
-				variant="outline"
-				size="icon"
-				onClick={openHeaderSettings}
-				className="h-9 w-9 shrink-0 rounded-lg border-border/80"
-				title={headerSettingsTitle}
-				aria-label={headerSettingsTitle}
-			>
-				<Settings className="size-5" strokeWidth={2.25} />
-			</Button>
+			{selectedCategory !== BOOKMARKS_VIEW_ID ? (
+				<Button
+					type="button"
+					variant="outline"
+					size="icon"
+					onClick={openHeaderSettings}
+					className="h-9 w-9 shrink-0 rounded-lg border-border/80"
+					title={headerSettingsTitle}
+					aria-label={headerSettingsTitle}
+				>
+					<Settings className="size-5" strokeWidth={2.25} />
+				</Button>
+			) : null}
 		</div>
 	)
 
@@ -729,7 +818,10 @@ export function ReelsHome() {
 								<SearchSkeleton />
 							) : sortedResults.length === 0 ? (
 								<p className="px-2 py-12 text-center text-muted-foreground pb-24 sm:px-3">
-									No results found.
+									{selectedCategory === BOOKMARKS_VIEW_ID &&
+									bookmarkMediaIds.length === 0
+										? "No bookmarks yet. Tap the bookmark on a reel to save it here."
+										: "No results found."}
 								</p>
 							) : listVirtualEnabled ? (
 								<div
@@ -752,7 +844,17 @@ export function ReelsHome() {
 													transform: `translateY(${vi.start}px)`,
 												}}
 											>
-												<MediaCard item={sortedResults[vi.index]} />
+												<MediaCard
+													item={sortedResults[vi.index]}
+													listIndex={vi.index}
+													onOpenDetail={setDetailIndex}
+													gridVideoSuspended={detailIndex !== null}
+													isDetailOpen={detailIndex === vi.index}
+													isBookmarked={isBookmarkedMediaId(
+														sortedResults[vi.index].id,
+													)}
+													onToggleBookmark={toggleBookmarkMediaId}
+												/>
 											</div>
 										)
 									})}
@@ -764,15 +866,37 @@ export function ReelsHome() {
 										"p-2 pb-24 sm:p-3",
 									)}
 								>
-									{sortedResults.map((item) => (
+									{sortedResults.map((item, index) => (
 										<div key={item.id} className={REEL_TILE_WRAP_CLASS}>
-											<MediaCard item={item} />
+											<MediaCard
+												item={item}
+												listIndex={index}
+												onOpenDetail={setDetailIndex}
+												gridVideoSuspended={detailIndex !== null}
+												isDetailOpen={detailIndex === index}
+												isBookmarked={isBookmarkedMediaId(item.id)}
+												onToggleBookmark={toggleBookmarkMediaId}
+											/>
 										</div>
 									))}
 								</div>
 							)}
 						</div>
 					</ReelsScrollRootContext.Provider>
+
+					{detailIndex !== null && sortedFull[detailIndex] ? (
+						<PostDetailDialog
+							item={sortedFull[detailIndex]}
+							open
+							onOpenChange={(open) => {
+								if (!open) setDetailIndex(null)
+							}}
+							canGoPrev={detailIndex > 0}
+							canGoNext={detailIndex < sortedFull.length - 1}
+							onGoPrev={goDetailPrev}
+							onGoNext={goDetailNext}
+						/>
+					) : null}
 
 					<OrderModal
 						open={orderOpen}

@@ -175,3 +175,56 @@ video.reel-grid-video:-webkit-full-screen {
 		height: 0.875rem;
 	}
 }
+
+@keyframes reel-detail-in-next {
+	from {
+		opacity: 0;
+		transform: translateX(1.25rem);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+@keyframes reel-detail-in-prev {
+	from {
+		opacity: 0;
+		transform: translateX(-1.25rem);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+@keyframes reel-detail-in-fade {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+.reel-detail-enter-next {
+	animation: reel-detail-in-next 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.reel-detail-enter-prev {
+	animation: reel-detail-in-prev 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.reel-detail-enter-fade {
+	animation: reel-detail-in-fade 0.22s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.reel-detail-enter-next,
+	.reel-detail-enter-prev,
+	.reel-detail-enter-fade {
+		animation: none;
+		opacity: 1;
+		transform: none;
+	}
+}

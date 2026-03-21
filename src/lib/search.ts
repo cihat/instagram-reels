@@ -82,6 +82,17 @@ export async function loadIndex(): Promise<void> {
 	})
 }
 
+/** Resolve items in the order of `ids` (skips unknown or missing ids). */
+export function getMediaItemsByIds(ids: string[]): MediaItem[] {
+	if (!fuse || items.length === 0) return []
+	const out: MediaItem[] = []
+	for (const id of ids) {
+		const item = idToItem.get(id)
+		if (item) out.push(item)
+	}
+	return out
+}
+
 export function search(params: SearchParams): MediaItem[] {
 	if (!fuse || items.length === 0) return []
 

@@ -1,12 +1,6 @@
 "use client"
 
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogTitle,
-} from "@/components/ui/dialog"
 import { usePlayingVideo } from "@/contexts/PlayingVideoContext"
 import { useReelsScrollRoot } from "@/contexts/ReelsScrollRootContext"
 import { useInView } from "@/hooks/useInView"
@@ -16,11 +10,19 @@ import {
 } from "@/lib/media-url"
 import type { MediaItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { Calendar, ExternalLink, Heart, User } from "lucide-react"
+import { Bookmark, Calendar, Heart } from "lucide-react"
 import { useEffect, useRef, useState, type CSSProperties } from "react"
 
 interface MediaCardProps {
 	item: MediaItem
+	listIndex: number
+	onOpenDetail: (index: number) => void
+	/** When set, grid video is paused (e.g. detail modal open). */
+	gridVideoSuspended?: boolean
+	/** True when the global detail dialog is showing this card's post. */
+	isDetailOpen?: boolean
+	isBookmarked?: boolean
+	onToggleBookmark?: (mediaId: string) => void
 	className?: string
 }
 
@@ -66,7 +68,16 @@ function shouldIgnoreCardClick(target: EventTarget | null): boolean {
 	)
 }
 
-export function MediaCard({ item, className }: MediaCardProps) {
+export function MediaCard({
+	item,
+	listIndex,
+	onOpenDetail,
+	gridVideoSuspended = false,
+	isDetailOpen = false,
+	isBookmarked = false,
+	onToggleBookmark,
+	className,
+}: MediaCardProps) {
 	const snippet = truncate(item.description || "No description", 100)
 	const hasVideo = Boolean(item.video_url?.trim())
 	const rawThumb = item.display_url?.trim() || ""
@@ -90,13 +101,9 @@ export function MediaCard({ item, className }: MediaCardProps) {
 		(rawThumb.length > 0 ? rawThumb : undefined)
 
 	const [videoSurfaceReady, setVideoSurfaceReady] = useState(false)
-	const [modalVideoReady, setModalVideoReady] = useState(false)
 	useEffect(() => {
 		setVideoSurfaceReady(false)
-		setModalVideoReady(false)
 	}, [item.id])
-
-	const [detailOpen, setDetailOpen] = useState(false)
 
 	// Keep aspect ratio fixed from index metadata only — using decoded video dimensions
 	// changes the box after load and retriggers virtualizer measure (scroll jump).
@@ -108,12 +115,7 @@ export function MediaCard({ item, className }: MediaCardProps) {
 		rootMargin: "320px 0px",
 	})
 
-	useEffect(() => {
-		if (!detailOpen) setModalVideoReady(false)
-	}, [detailOpen])
-
 	const videoRef = useRef<HTMLVideoElement>(null)
-	const modalVideoRef = useRef<HTMLVideoElement>(null)
 	const { playingId, setPlayingId } = usePlayingVideo()
 
 	useEffect(() => {
@@ -125,15 +127,15 @@ export function MediaCard({ item, className }: MediaCardProps) {
 		) {
 			videoRef.current.pause()
 		}
-		if (
-			playingId !== null &&
-			playingId !== item.id &&
-			modalVideoRef.current &&
-			!modalVideoRef.current.paused
-		) {
-			modalVideoRef.current.pause()
-		}
 	}, [playingId, item.id])
+
+	useEffect(() => {
+		if (!gridVideoSuspended) return
+		if (videoRef.current && !videoRef.current.paused) {
+			videoRef.current.pause()
+			if (playingId === item.id) setPlayingId(null)
+		}
+	}, [gridVideoSuspended, playingId, item.id, setPlayingId])
 
 	useEffect(() => {
 		if (!inView && hasVideo && videoRef.current && !videoRef.current.paused) {
@@ -142,33 +144,16 @@ export function MediaCard({ item, className }: MediaCardProps) {
 		}
 	}, [inView, hasVideo, playingId, item.id, setPlayingId])
 
-	useEffect(() => {
-		if (detailOpen) {
-			videoRef.current?.pause()
-		} else {
-			modalVideoRef.current?.pause()
-			if (playingId === item.id) setPlayingId(null)
-		}
-	}, [detailOpen, playingId, item.id, setPlayingId])
-
-	const handleDetailOpenChange = (open: boolean) => {
-		setDetailOpen(open)
-		if (!open) {
-			modalVideoRef.current?.pause()
-			if (playingId === item.id) setPlayingId(null)
-		}
-	}
-
 	const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
 		if (shouldIgnoreCardClick(e.target)) return
-		setDetailOpen(true)
+		onOpenDetail(listIndex)
 	}
 
 	const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
 		if (e.key !== "Enter" && e.key !== " ") return
 		if (shouldIgnoreCardClick(e.target)) return
 		e.preventDefault()
-		setDetailOpen(true)
+		onOpenDetail(listIndex)
 	}
 
 	const videoWidthAttr =
@@ -176,24 +161,46 @@ export function MediaCard({ item, className }: MediaCardProps) {
 	const videoHeightAttr =
 		item.height && item.height > 0 ? Math.round(item.height) : undefined
 
-	const fullDescription =
-		item.description?.trim() || "No description."
-
 	return (
-		<>
-			<Card
-				tabIndex={0}
-				aria-haspopup="dialog"
-				aria-expanded={detailOpen}
-				aria-label={`@${item.username} post — click or press Enter for details`}
-				onClick={handleCardClick}
-				onKeyDown={handleCardKeyDown}
-				className={cn(
-					"box-border h-auto min-h-0 w-full max-w-full cursor-pointer overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm outline-none md:hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-0 gap-3 [contain:layout]",
-					className,
-				)}
-			>
-				<CardContent className="min-h-0 p-0" ref={ref}>
+		<Card
+			tabIndex={0}
+			aria-haspopup="dialog"
+			aria-expanded={isDetailOpen}
+			aria-label={`@${item.username} post — click or press Enter for details`}
+			onClick={handleCardClick}
+			onKeyDown={handleCardKeyDown}
+			className={cn(
+				"box-border h-auto min-h-0 w-full max-w-full cursor-pointer overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm outline-none md:hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-0 gap-3 [contain:layout]",
+				className,
+			)}
+		>
+				<CardContent className="relative min-h-0 p-0" ref={ref}>
+					{onToggleBookmark ? (
+						<button
+							type="button"
+							className={cn(
+								"absolute right-2 top-2 z-[4] flex size-9 items-center justify-center rounded-full border border-border/70 bg-background/90 text-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-background",
+								isBookmarked && "text-amber-600",
+							)}
+							title={
+								isBookmarked ? "Remove from bookmarks" : "Save to bookmarks"
+							}
+							aria-label={
+								isBookmarked ? "Remove from bookmarks" : "Save to bookmarks"
+							}
+							aria-pressed={isBookmarked}
+							onClick={(e) => {
+								e.preventDefault()
+								e.stopPropagation()
+								onToggleBookmark(item.id)
+							}}
+						>
+							<Bookmark
+								className={cn("size-4", isBookmarked && "fill-amber-400")}
+								strokeWidth={2}
+							/>
+						</button>
+					) : null}
 					{hasVideo ? (
 						<div
 							className={cn(mediaFrameClass, "isolate")}
@@ -327,134 +334,6 @@ export function MediaCard({ item, className }: MediaCardProps) {
 						</div>
 					)}
 				</CardFooter>
-			</Card>
-
-			<Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
-				<DialogContent
-					showCloseButton
-					className="flex max-h-[min(92vh,900px)] w-[min(96vw,960px)] max-w-[min(96vw,960px)] flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-[min(96vw,960px)]"
-				>
-					<DialogTitle className="sr-only">
-						@{item.username} — {truncate(fullDescription, 80)}
-					</DialogTitle>
-					<DialogDescription className="sr-only">
-						{fullDescription}
-					</DialogDescription>
-
-					<div className="flex min-h-0 flex-1 flex-col md:flex-row md:max-h-[min(88vh,860px)]">
-						<div className="relative flex min-h-[200px] flex-1 items-center justify-center bg-black md:min-h-0 md:max-w-[min(48%,420px)]">
-							{hasVideo ? (
-								<div className="relative flex h-full min-h-[200px] w-full items-center justify-center">
-									<video
-										ref={modalVideoRef}
-										className={cn(
-											"reel-grid-video max-h-[min(50vh,720px)] w-full max-w-full object-contain md:max-h-[min(82vh,800px)]",
-											modalVideoReady
-												? "relative z-[2] opacity-100"
-												: "absolute inset-0 z-0 mx-auto max-h-[min(50vh,720px)] w-full max-w-full object-contain opacity-0 pointer-events-none md:max-h-[min(82vh,800px)]",
-										)}
-										src={item.video_url}
-										poster={thumbForLayer ? undefined : posterAttr}
-										width={videoWidthAttr}
-										height={videoHeightAttr}
-										controls
-										preload="metadata"
-										playsInline
-										onLoadedData={() => setModalVideoReady(true)}
-										onError={() => setModalVideoReady(true)}
-										onPlay={() => setPlayingId(item.id)}
-										onPause={() => {
-											if (playingId === item.id) setPlayingId(null)
-										}}
-									>
-										Your browser does not support the video tag.
-									</video>
-									{thumbForLayer ? (
-										// eslint-disable-next-line @next/next/no-img-element -- proxy / external CDN
-										<img
-											src={imgSrc || rawThumb}
-											alt=""
-											className={cn(
-												"absolute inset-0 z-[3] m-auto max-h-[min(50vh,720px)] w-full max-w-full object-contain transition-opacity duration-150 md:max-h-[min(82vh,800px)]",
-												modalVideoReady &&
-													"z-[1] opacity-0 pointer-events-none",
-											)}
-											decoding="async"
-											referrerPolicy="no-referrer"
-										/>
-									) : null}
-								</div>
-							) : rawThumb ? (
-								// eslint-disable-next-line @next/next/no-img-element -- proxy / external CDN
-								<img
-									src={imgSrc || rawThumb}
-									alt=""
-									className="max-h-[min(50vh,720px)] w-full max-w-full object-contain md:max-h-[min(82vh,800px)]"
-									referrerPolicy="no-referrer"
-								/>
-							) : null}
-						</div>
-
-						<div className="flex max-h-[42vh] min-h-0 w-full flex-col gap-3 overflow-y-auto border-t border-border p-4 md:max-h-none md:w-[min(100%,400px)] md:shrink-0 md:border-t-0 md:border-l">
-							<div className="flex items-start gap-2">
-								<User
-									className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-									aria-hidden
-								/>
-								<div className="min-w-0">
-									<p className="font-semibold leading-tight">
-										{item.fullname || item.username}
-									</p>
-									<p className="text-sm text-muted-foreground">
-										@{item.username}
-									</p>
-								</div>
-							</div>
-
-							<p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-								{fullDescription}
-							</p>
-
-							{item.tags.length > 0 && (
-								<div className="flex flex-wrap gap-1.5">
-									{item.tags.map((tag) => (
-										<span
-											key={tag}
-											className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
-										>
-											#{tag}
-										</span>
-									))}
-								</div>
-							)}
-
-							<div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-								<span className="inline-flex items-center gap-1.5">
-									<Calendar className="size-4 shrink-0" />
-									{formatDate(item.post_date)}
-								</span>
-								<span className="inline-flex items-center gap-1.5">
-									<Heart className="size-4 shrink-0" strokeWidth={1.8} />
-									{item.likes > 0
-										? item.likes.toLocaleString("en-US")
-										: "0"}{" "}
-									likes
-								</span>
-							</div>
-
-							<a
-								href={item.post_url}
-								target="_blank"
-								rel="noopener noreferrer"
-								className="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
-							>
-								<ExternalLink className="size-4" />
-								Open on Instagram
-							</a>
-						</div>
-					</div>
-				</DialogContent>
-			</Dialog>
-		</>
+		</Card>
 	)
 }

@@ -29,7 +29,13 @@ import {
 	type StoredCustomCategory,
 } from "@/lib/custom-categories-storage"
 import {
+	loadBookmarkMediaIds,
+	persistBookmarkMediaIds,
+	toggleBookmarkMediaIdInList,
+} from "@/lib/reel-bookmarks-storage"
+import {
 	ALL_VIDEOS_INDEX_EDITOR_ID,
+	BOOKMARKS_VIEW_ID,
 	BUILTIN_REEL_CATEGORY_IDS,
 	OTHER_CATEGORY_ID,
 	REEL_CATEGORIES,
@@ -85,6 +91,10 @@ type CategoryFilterContextValue = {
 	/** Category ids starred in the sidebar; order defines priority at the top */
 	favoriteCategoryOrder: string[]
 	toggleFavoriteCategory: (categoryId: string) => void
+	/** Bookmarked reel ids (newest bookmark last); persisted locally */
+	bookmarkMediaIds: string[]
+	toggleBookmarkMediaId: (mediaId: string) => void
+	isBookmarkedMediaId: (mediaId: string) => boolean
 }
 
 const CategoryFilterContext = createContext<CategoryFilterContextValue | null>(
@@ -109,6 +119,7 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 	const [favoriteCategoryOrder, setFavoriteCategoryOrder] = useState<
 		string[]
 	>([])
+	const [bookmarkMediaIds, setBookmarkMediaIds] = useState<string[]>([])
 
 	const accountOverridesRef = useRef(accountOverrides)
 	accountOverridesRef.current = accountOverrides
@@ -141,11 +152,14 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 		setFavoriteCategoryOrder(prunedFav)
 		setAccountOverrides(loadCategoryAccountOverrides(allowed))
 		setHiddenAccountNormsByCategory(loadCategoryHiddenAccounts(allowed))
+		setBookmarkMediaIds(loadBookmarkMediaIds())
 		const raw = readStoredSelectedCategoryId()
-		if (raw && allowed.has(raw)) setSelectedCategoryState(raw)
+		if (raw === BOOKMARKS_VIEW_ID) setSelectedCategoryState(raw)
+		else if (raw && allowed.has(raw)) setSelectedCategoryState(raw)
 		else {
 			setSelectedCategoryState(null)
-			if (raw && !allowed.has(raw)) persistSelectedCategory(null)
+			if (raw && raw !== BOOKMARKS_VIEW_ID && !allowed.has(raw))
+				persistSelectedCategory(null)
 		}
 		setHydrated(true)
 	}, [])
@@ -153,7 +167,11 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 	const setSelectedCategory = useCallback((category: string | null) => {
 		const allowed = allowedCategoryIdsFromRef()
 		const next =
-			category != null && allowed.has(category) ? category : null
+			category === BOOKMARKS_VIEW_ID
+				? category
+				: category != null && allowed.has(category)
+					? category
+					: null
 		setSelectedCategoryState(next)
 		persistSelectedCategory(next)
 	}, [allowedCategoryIdsFromRef])
@@ -403,6 +421,24 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 		})
 	}, [])
 
+	const bookmarkIdSet = useMemo(
+		() => new Set(bookmarkMediaIds),
+		[bookmarkMediaIds],
+	)
+
+	const isBookmarkedMediaId = useCallback(
+		(id: string) => bookmarkIdSet.has(id),
+		[bookmarkIdSet],
+	)
+
+	const toggleBookmarkMediaId = useCallback((mediaId: string) => {
+		setBookmarkMediaIds((prev) => {
+			const next = toggleBookmarkMediaIdInList(prev, mediaId)
+			persistBookmarkMediaIds(next)
+			return next
+		})
+	}, [])
+
 	const assignableCategoryIds = useMemo(
 		() => [
 			...REEL_CATEGORIES.map((c) => c.id),
@@ -424,6 +460,7 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 		(id: string) => {
 			if (id === OTHER_CATEGORY_ID) return "Other"
 			if (id === ALL_VIDEOS_INDEX_EDITOR_ID) return "All videos"
+			if (id === BOOKMARKS_VIEW_ID) return "Bookmarks"
 			const b = REEL_CATEGORIES.find((c) => c.id === id)
 			if (b) return b.label
 			return customCategories.find((c) => c.id === id)?.label ?? id
@@ -483,6 +520,9 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 			setSourcesModalOpen,
 			favoriteCategoryOrder,
 			toggleFavoriteCategory,
+			bookmarkMediaIds,
+			toggleBookmarkMediaId,
+			isBookmarkedMediaId,
 		}),
 		[
 			hydrated,
@@ -508,6 +548,9 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 			sourcesModalOpen,
 			favoriteCategoryOrder,
 			toggleFavoriteCategory,
+			bookmarkMediaIds,
+			toggleBookmarkMediaId,
+			isBookmarkedMediaId,
 		],
 	)
 

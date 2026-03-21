@@ -37,6 +37,7 @@ import {
 	Laugh,
 	LeafyGreen,
 	Layers,
+	Library,
 	Medal,
 	Microscope,
 	MonitorPlay,
@@ -90,6 +91,7 @@ import {
 } from "@/components/ui/sidebar"
 import { useCategoryFilter } from "@/contexts/CategoryFilterContext"
 import {
+	BOOKMARKS_VIEW_ID,
 	OTHER_CATEGORY_ID,
 	type ReelCategoryId,
 } from "@/lib/reel-categories"
@@ -228,6 +230,28 @@ export function AppSidebar() {
 									>
 										<Video />
 										<span>All Videos</span>
+									</SidebarMenuButton>
+								</SidebarMenuItem>
+							</SidebarMenu>
+						</SidebarGroupContent>
+					</SidebarGroup>
+
+					<SidebarGroup>
+						<SidebarGroupLabel>Bookmarks</SidebarGroupLabel>
+						<SidebarGroupContent>
+							<SidebarMenu>
+								<SidebarMenuItem>
+									<SidebarMenuButton
+										isActive={
+											pathname === REELS_PATH &&
+											selectedCategory === BOOKMARKS_VIEW_ID
+										}
+										tooltip="Saved reels"
+										render={<Link href={REELS_PATH} />}
+										onClick={() => setSelectedCategory(BOOKMARKS_VIEW_ID)}
+									>
+										<Library />
+										<span>Bookmarks</span>
 									</SidebarMenuButton>
 								</SidebarMenuItem>
 							</SidebarMenu>

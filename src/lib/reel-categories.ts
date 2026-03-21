@@ -65,6 +65,9 @@ export const OTHER_CATEGORY_ID = "other" as const
  */
 export const ALL_VIDEOS_INDEX_EDITOR_ID = "__all_videos_index__" as const
 
+/** Sidebar + filter: show posts saved via bookmark (order preserved in storage) */
+export const BOOKMARKS_VIEW_ID = "__reel_bookmarks__" as const
+
 /** Curated public handles used as category defaults and onboarding seeds */
 export const DEFAULT_BUILTIN_CATEGORY_ACCOUNTS: Record<
 	ReelCategoryId,
