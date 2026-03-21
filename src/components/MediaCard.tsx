@@ -122,7 +122,25 @@ export function MediaCard({
 
 	const videoRef = useRef<HTMLVideoElement>(null)
 	const wasInViewRef = useRef(false)
-	const { playingId, setPlayingId } = usePlayingVideo()
+	const { playingId, setPlayingId, audibleMediaId, setAudibleMediaId } =
+		usePlayingVideo()
+
+	/** Grid never plays audio while the detail modal is open — modal owns sound. */
+	const isGridAudible =
+		!gridVideoSuspended &&
+		!isDetailOpen &&
+		gridSoundOn &&
+		audibleMediaId === item.id
+
+	useEffect(() => {
+		if (
+			gridSoundOn &&
+			audibleMediaId !== null &&
+			audibleMediaId !== item.id
+		) {
+			setGridSoundOn(false)
+		}
+	}, [audibleMediaId, item.id, gridSoundOn])
 
 	useEffect(() => {
 		if (!gridVideoSuspended) return
@@ -131,6 +149,14 @@ export function MediaCard({
 			if (playingId === item.id) setPlayingId(null)
 		}
 	}, [gridVideoSuspended, playingId, item.id, setPlayingId])
+
+	/** Modal açılınca grid’deki ses kapansın (UI + gerçek muted). */
+	useEffect(() => {
+		if (!gridVideoSuspended && !isDetailOpen) return
+		setGridSoundOn(false)
+		const v = videoRef.current
+		if (v) v.muted = true
+	}, [gridVideoSuspended, isDetailOpen])
 
 	useEffect(() => {
 		if (!hasVideo || !videoRef.current) {
@@ -152,13 +178,13 @@ export function MediaCard({
 		}
 	}, [inView, hasVideo, playingId, item.id, setPlayingId])
 
-	/** Autoplay in view; muted unless user turned sound on for this tile. */
+	/** Autoplay in view; muted unless this tile holds global audible slot. */
 	useEffect(() => {
 		if (!hasVideo || !inView || gridVideoSuspended) return
 		const v = videoRef.current
 		if (!v) return
-		v.muted = !gridSoundOn
-		if (gridSoundOn) v.volume = 1
+		v.muted = !isGridAudible
+		if (isGridAudible) v.volume = 1
 		void v.play().catch(() => {})
 	}, [
 		hasVideo,
@@ -166,7 +192,7 @@ export function MediaCard({
 		gridVideoSuspended,
 		item.id,
 		item.video_url,
-		gridSoundOn,
+		isGridAudible,
 	])
 
 	const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -247,7 +273,7 @@ export function MediaCard({
 								width={videoWidthAttr}
 								height={videoHeightAttr}
 								autoPlay
-								muted={!gridSoundOn}
+								muted={!isGridAudible}
 								loop
 								preload={inView ? "metadata" : "none"}
 								playsInline
@@ -298,20 +324,34 @@ export function MediaCard({
 									"absolute bottom-1.5 right-1.5",
 									mediaChromeButtonClass,
 									gridSoundOn && "text-primary",
+									gridVideoSuspended &&
+										"pointer-events-none opacity-40",
 								)}
 								title={gridSoundOn ? "Mute" : "Unmute"}
 								aria-label={gridSoundOn ? "Mute video" : "Unmute video"}
 								aria-pressed={gridSoundOn}
+								disabled={gridVideoSuspended}
 								onClick={(e) => {
 									e.preventDefault()
 									e.stopPropagation()
+									if (gridVideoSuspended) return
 									setGridSoundOn((on) => {
 										const next = !on
 										const v = videoRef.current
-										if (v) {
-											v.muted = !next
-											if (next) v.volume = 1
-											void v.play().catch(() => {})
+										if (next) {
+											setAudibleMediaId(item.id)
+											if (v) {
+												v.muted = false
+												v.volume = 1
+												void v.play().catch(() => {})
+											}
+										} else {
+											setAudibleMediaId((prev) =>
+												prev === item.id ? null : prev,
+											)
+											if (v) {
+												v.muted = true
+											}
 										}
 										return next
 									})

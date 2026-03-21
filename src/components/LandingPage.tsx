@@ -16,7 +16,7 @@ export function LandingPage() {
 			<header className="border-b border-border/80 bg-background/95 backdrop-blur-sm">
 				<div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
 					<Link
-						href="/"
+						href="/landing"
 						className="flex items-center gap-2 font-semibold tracking-tight"
 					>
 						<img

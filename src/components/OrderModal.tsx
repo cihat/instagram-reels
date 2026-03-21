@@ -1,11 +1,12 @@
 "use client"
 
 import { useEffect } from "react"
-import { Calendar, Heart, ListOrdered } from "lucide-react"
+import { Calendar, Heart, ListOrdered, Shuffle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { SortOption } from "@/lib/types"
 
 const SORT_OPTIONS: { value: SortOption; label: string; icon: typeof Calendar }[] = [
+	{ value: "random", label: "Random (new shuffle each visit)", icon: Shuffle },
 	{ value: "relevance", label: "Default (search order)", icon: ListOrdered },
 	{ value: "date_desc", label: "Date (newest first)", icon: Calendar },
 	{ value: "date_asc", label: "Date (oldest first)", icon: Calendar },

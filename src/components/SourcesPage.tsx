@@ -205,7 +205,7 @@ export function SourcesPage() {
 								variant="outline"
 								className="gap-2"
 								nativeButton={false}
-								render={<Link href="/" prefetch={false} />}
+								render={<Link href="/reels" prefetch={false} />}
 							>
 								<ArrowLeft className="size-4" aria-hidden />
 								Home

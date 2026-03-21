@@ -122,11 +122,24 @@ export function PostDetailDialog({
 	const suppressModalLoadedAutoplay = useRef(false)
 	const [viewportFillOpen, setViewportFillOpen] = useState(false)
 	const [portalReady, setPortalReady] = useState(false)
-	const { playingId, setPlayingId } = usePlayingVideo()
+	const { playingId, setPlayingId, setAudibleMediaId } = usePlayingVideo()
 
 	useEffect(() => {
 		setPortalReady(true)
 	}, [])
+
+	/** One global unmuted clip: modal video owns the slot while open. */
+	useEffect(() => {
+		if (!open) {
+			setAudibleMediaId(null)
+			return
+		}
+		if (hasVideo) setAudibleMediaId(item.id)
+		else setAudibleMediaId(null)
+		return () => {
+			setAudibleMediaId(null)
+		}
+	}, [open, hasVideo, item.id, setAudibleMediaId])
 
 	useEffect(() => {
 		if (!open) setViewportFillOpen(false)
@@ -265,17 +278,6 @@ export function PostDetailDialog({
 		setSlideMode("next")
 		onGoNext()
 	}, [canGoNext, onGoNext])
-
-	useEffect(() => {
-		if (
-			playingId !== null &&
-			playingId !== item.id &&
-			modalVideoRef.current &&
-			!modalVideoRef.current.paused
-		) {
-			modalVideoRef.current.pause()
-		}
-	}, [playingId, item.id])
 
 	const handleOpenChange = (next: boolean) => {
 		onOpenChange(next)

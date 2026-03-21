@@ -13,7 +13,7 @@ import {
 	useState,
 } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowUpDown, Search, Settings } from "lucide-react"
+import { ArrowUpDown, Search, Settings, Shuffle } from "lucide-react"
 import { AccountFilterBar } from "@/components/AccountFilterBar"
 import { AccountOrganizeModal } from "@/components/AccountOrganizeModal"
 import { CategoryAccountsModal } from "@/components/CategoryAccountsModal"
@@ -129,6 +129,7 @@ const REEL_TILE_WRAP_CLASS =
 	"mb-2 w-full break-inside-avoid [page-break-inside:avoid]"
 
 const VALID_SORT_OPTIONS: SortOption[] = [
+	"random",
 	"relevance",
 	"date_desc",
 	"date_asc",
@@ -137,7 +138,7 @@ const VALID_SORT_OPTIONS: SortOption[] = [
 ]
 
 function getStoredSort(): SortOption {
-	if (typeof window === "undefined") return "relevance"
+	if (typeof window === "undefined") return "random"
 	try {
 		const stored = localStorage.getItem(SORT_STORAGE_KEY)
 		if (stored && VALID_SORT_OPTIONS.includes(stored as SortOption))
@@ -145,7 +146,33 @@ function getStoredSort(): SortOption {
 	} catch {
 		// ignore
 	}
-	return "relevance"
+	return "random"
+}
+
+/** Stable pseudo-random order for a session; reshuffles when `salt` changes (new visit). */
+function fnv1aHash32(str: string): number {
+	let h = 2166136261
+	for (let i = 0; i < str.length; i++) {
+		h ^= str.charCodeAt(i)
+		h = Math.imul(h, 16777619)
+	}
+	return h >>> 0
+}
+
+function orderItemsRandomSession(items: MediaItem[], salt: string): MediaItem[] {
+	const arr = [...items]
+	arr.sort(
+		(a, b) =>
+			fnv1aHash32(`${salt}:${a.id}`) - fnv1aHash32(`${salt}:${b.id}`),
+	)
+	return arr
+}
+
+function newRandomOrderSalt(): string {
+	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		return crypto.randomUUID()
+	}
+	return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
 }
 
 function sortItems(items: MediaItem[], sortBy: SortOption): MediaItem[] {
@@ -215,17 +242,35 @@ export function ReelsHome() {
 	const [visibleCount, setVisibleCount] = useState(REELS_PAGE_INITIAL)
 	const [searchPending, setSearchPending] = useState(false)
 	const [sortBy, setSortByState] = useState<SortOption>(getStoredSort)
+	const [randomOrderSalt, setRandomOrderSalt] = useState(newRandomOrderSalt)
 
-	const setSortBy = (value: SortOption) => {
+	const setSortBy = useCallback((value: SortOption) => {
 		setSortByState(value)
 		try {
 			localStorage.setItem(SORT_STORAGE_KEY, value)
 		} catch {
 			// ignore
 		}
-	}
+	}, [])
+
 	const [orderOpen, setOrderOpen] = useState(false)
 	const [detailIndex, setDetailIndex] = useState<number | null>(null)
+
+	const reshuffleFeed = useCallback(() => {
+		setDetailIndex(null)
+		setRandomOrderSalt(newRandomOrderSalt())
+		setSortByState((prev) => {
+			if (prev !== "random") {
+				try {
+					localStorage.setItem(SORT_STORAGE_KEY, "random")
+				} catch {
+					/* ignore */
+				}
+				return "random"
+			}
+			return prev
+		})
+	}, [])
 	const [categorySettingsOpen, setCategorySettingsOpen] = useState(false)
 	const [headerSettingsCategoryId, setHeaderSettingsCategoryId] = useState<
 		string | null
@@ -394,10 +439,15 @@ export function ReelsHome() {
 		)
 	}
 
-	const sortedFull = useMemo(
-		() => sortItems(results, sortBy),
-		[results, sortBy],
-	)
+	const sortedFull = useMemo(() => {
+		const hasQuery = query.trim() !== ""
+		const effectiveSort: SortOption =
+			hasQuery && sortBy === "random" ? "relevance" : sortBy
+		if (effectiveSort === "random") {
+			return orderItemsRandomSession(results, randomOrderSalt)
+		}
+		return sortItems(results, effectiveSort)
+	}, [results, sortBy, query, randomOrderSalt])
 	const sortedResults = useMemo(
 		() => sortedFull.slice(0, visibleCount),
 		[sortedFull, visibleCount],
@@ -409,6 +459,21 @@ export function ReelsHome() {
 
 	const sortedFullRef = useRef(sortedFull)
 	sortedFullRef.current = sortedFull
+
+	/** New index rows (e.g. after refresh) — extend slice so items aren’t stuck past `visibleCount`. */
+	const prevResultsLengthRef = useRef(-1)
+	useEffect(() => {
+		const n = results.length
+		const prev = prevResultsLengthRef.current
+		prevResultsLengthRef.current = n
+		if (prev < 0) return
+		if (n <= prev) return
+		const added = n - prev
+		const cap = Math.min(added, REELS_PAGE_SIZE * 3)
+		setVisibleCount((c) =>
+			Math.min(c + cap, sortedFullRef.current.length),
+		)
+	}, [results.length])
 
 	useEffect(() => {
 		if (detailIndex !== null && detailIndex >= sortedFull.length) {
@@ -700,6 +765,17 @@ export function ReelsHome() {
 
 	const headerTrailing = (
 		<div className="flex shrink-0 items-center gap-1">
+			<Button
+				type="button"
+				variant="outline"
+				size="icon"
+				onClick={reshuffleFeed}
+				className="h-9 w-9 shrink-0 rounded-lg border-border/80"
+				title="Shuffle order"
+				aria-label="Shuffle reel order"
+			>
+				<Shuffle className="size-4" strokeWidth={2} />
+			</Button>
 			{!(isNarrowViewport && mobileSearchOpen) && sortMobileButton}
 			{selectedCategory !== BOOKMARKS_VIEW_ID ? (
 				<Button

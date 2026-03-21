@@ -33,6 +33,7 @@ export interface SearchParams {
 }
 
 export type SortOption =
+	| "random"
 	| "relevance"
 	| "date_desc"
 	| "date_asc"
