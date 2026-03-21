@@ -1,10 +1,8 @@
 # Copy to .dev.vars for OpenNext / Wrangler preview. `next dev` için aynı anahtarları .env.local içinde kullanın.
 NEXTJS_ENV=development
 
-# POST /api/trigger-fetch — üretimde zorunlu önerilir
+# POST /api/fetch-metadata — üretimde zorunlu önerilir
 # FETCH_TRIGGER_SECRET=uzun-rastgele-dize
 
-# repository_dispatch tetikleme (PAT: Contents: Read/Write + Metadata veya classic repo scope)
-# GITHUB_REPO_OWNER=sizin-org
-# GITHUB_REPO=reels-search
-# GITHUB_ACTIONS_PAT=ghp_...
+# Instagram web isteği için tarayıcıdan kopyalanan Cookie satırı (sessionid=…; csrftoken=…; …)
+# INSTAGRAM_COOKIES=

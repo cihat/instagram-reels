@@ -2,8 +2,7 @@
 declare namespace NodeJS {
 	interface ProcessEnv {
 		FETCH_TRIGGER_SECRET?: string
-		GITHUB_REPO_OWNER?: string
-		GITHUB_REPO?: string
-		GITHUB_ACTIONS_PAT?: string
+		/** Tarayıcı Cookie başlığı (sessionid, csrftoken, …) */
+		INSTAGRAM_COOKIES?: string
 	}
 }

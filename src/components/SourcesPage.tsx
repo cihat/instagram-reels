@@ -55,7 +55,7 @@ export function SourcesPage() {
 
 		setLoading(true)
 		try {
-			const res = await fetch("/api/trigger-fetch", {
+			const res = await fetch("/api/fetch-metadata", {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({
@@ -68,6 +68,8 @@ export function SourcesPage() {
 				message?: string
 				error?: string
 				detail?: string
+				warnings?: string[]
+				persisted?: boolean
 			}
 
 			if (!res.ok) {
@@ -76,7 +78,16 @@ export function SourcesPage() {
 				)
 				return
 			}
-			setMessage(data.message ?? "Tamam.")
+			const warnText =
+				data.warnings?.filter(Boolean).join("\n") ?? ""
+			const persistNote = data.persisted === false
+				? "\n\nNot: R2’ye yazılamadı — üretimde Wrangler’da REELS_BUCKET bağlayın."
+				: ""
+			setMessage(
+				[data.message, warnText ? `Uyarılar:\n${warnText}` : "", persistNote]
+					.filter(Boolean)
+					.join("\n\n"),
+			)
 		} catch {
 			setError("Ağ hatası — tekrar deneyin.")
 		} finally {
@@ -101,8 +112,9 @@ export function SourcesPage() {
 
 			<main className="mx-auto max-w-lg px-4 py-6 pb-12">
 				<p className="mb-4 text-sm text-muted-foreground leading-relaxed">
-					Takip etmek istediğiniz Instagram kullanıcı adlarını girin (@ olmadan). Bu sayfada
-					video yok; yalnızca metadatanın GitHub üzerinden çekilmesini tetiklersiniz.
+					Takip etmek istediğiniz Instagram kullanıcı adlarını girin (@ olmadan). Bu sayfada video
+					yok; sunucu Instagram’a doğrudan istek atar, gelen verileri indekse ekler (R2
+					bağlıysa <code className="rounded bg-muted px-1 text-[11px]">index.json</code> güncellenir).
 				</p>
 
 				<form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -149,10 +161,14 @@ export function SourcesPage() {
 							autoComplete="off"
 						/>
 						<p className="mt-1 text-xs text-muted-foreground">
-							Üretimde mutlaka sunucuda{" "}
+							Üretimde sunucuda{" "}
 							<code className="rounded bg-muted px-1 py-0.5 text-[11px]">FETCH_TRIGGER_SECRET</code>{" "}
-							tanımlayın ve buraya aynı değeri girin. Tanımlı değilse (yalnızca yerel deneme) istek
-							anahtarsız kabul edilir.
+							tanımlayın ve buraya aynı değeri girin. Tanımlı değilse yalnızca yerel denemede
+							anahtarsız kabul edilir. Asıl oturum için{" "}
+							<code className="rounded bg-muted px-1 py-0.5 text-[11px]">INSTAGRAM_COOKIES</code>{" "}
+							(secret) gerekir — tarayıcıda giriş yaptıktan sonra istek başlığındaki{" "}
+							<code className="rounded bg-muted px-1 py-0.5 text-[11px]">Cookie</code> değerini
+							kopyalayın.
 						</p>
 					</div>
 
