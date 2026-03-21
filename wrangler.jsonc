@@ -1,0 +1,33 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "reels-search-next",
+	"main": ".open-next/worker.js",
+	"compatibility_date": "2026-03-17",
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".open-next/assets"
+	},
+	"images": {
+		"binding": "IMAGES"
+	},
+	"services": [
+		{
+			"binding": "WORKER_SELF_REFERENCE",
+			"service": "reels-search-next"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "REELS_BUCKET",
+			"bucket_name": "reels-search-data"
+		}
+	],
+	"observability": {
+		"enabled": true
+	}
+}
