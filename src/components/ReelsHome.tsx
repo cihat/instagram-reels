@@ -11,6 +11,7 @@ import {
 	useMemo,
 	useRef,
 	useState,
+	useSyncExternalStore,
 } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowUpDown, Search, Settings, Shuffle } from "lucide-react"
@@ -48,9 +49,12 @@ import type { MediaItem, SortOption } from "@/lib/types"
 
 const SEARCH_DEBOUNCE_MS = 450
 const SORT_STORAGE_KEY = "reels-search-sort"
-/** First paint batch; more rows load while scrolling */
-const REELS_PAGE_INITIAL = 72
-const REELS_PAGE_SIZE = 48
+/** Desktop: first paint batch; more rows load while scrolling */
+const REELS_PAGE_INITIAL_DESKTOP = 72
+const REELS_PAGE_SIZE_DESKTOP = 48
+/** Mobile: fewer tiles + smaller pages = less video decode & layout work */
+const REELS_PAGE_INITIAL_MOBILE = 20
+const REELS_PAGE_SIZE_MOBILE = 16
 const REELS_SCROLL_LOAD_THRESHOLD_PX = 720
 
 /** Matches Tailwind `columns-*` breakpoints used before virtualization */
@@ -66,7 +70,23 @@ const REEL_MASONRY_GAP_PX = 8
 /** Bottom space above fixed search UI (`pb-24`) */
 const REEL_LIST_PADDING_END_PX = 96
 /** Below this count, render a normal CSS-columns grid; virtualize only for large lists. */
-const REELS_VIRTUAL_MIN_ITEMS = 128
+const REELS_VIRTUAL_MIN_DESKTOP = 128
+/** Mobile: virtualize sooner — full-column grids melt low-end GPUs. */
+const REELS_VIRTUAL_MIN_MOBILE = 28
+
+function subscribeMaxWidth767(callback: () => void) {
+	if (typeof window === "undefined") return () => {}
+	const mq = window.matchMedia("(max-width: 767px)")
+	mq.addEventListener("change", callback)
+	return () => mq.removeEventListener("change", callback)
+}
+
+function snapshotMaxWidth767(): boolean {
+	return (
+		typeof window !== "undefined" &&
+		window.matchMedia("(max-width: 767px)").matches
+	)
+}
 
 function useReelLaneCount(): number {
 	const [lanes, setLanes] = useState(2)
@@ -239,7 +259,7 @@ export function ReelsHome() {
 	const [error, setError] = useState<string | null>(null)
 	const [query, setQuery] = useState("")
 	const [results, setResults] = useState<MediaItem[]>([])
-	const [visibleCount, setVisibleCount] = useState(REELS_PAGE_INITIAL)
+	const [visibleCount, setVisibleCount] = useState(REELS_PAGE_INITIAL_DESKTOP)
 	const [searchPending, setSearchPending] = useState(false)
 	const [sortBy, setSortByState] = useState<SortOption>(getStoredSort)
 	const [randomOrderSalt, setRandomOrderSalt] = useState(newRandomOrderSalt)
@@ -338,8 +358,23 @@ export function ReelsHome() {
 		bookmarkMediaIds,
 	])
 
+	const isNarrowViewport = useSyncExternalStore(
+		subscribeMaxWidth767,
+		snapshotMaxWidth767,
+		() => false,
+	)
+
+	const pageSize = isNarrowViewport
+		? REELS_PAGE_SIZE_MOBILE
+		: REELS_PAGE_SIZE_DESKTOP
+	const virtualMinItems = isNarrowViewport
+		? REELS_VIRTUAL_MIN_MOBILE
+		: REELS_VIRTUAL_MIN_DESKTOP
+
 	const replaceSearchResults = useCallback(() => {
-		setVisibleCount(REELS_PAGE_INITIAL)
+		setVisibleCount(
+			isNarrowViewport ? REELS_PAGE_INITIAL_MOBILE : REELS_PAGE_INITIAL_DESKTOP,
+		)
 		if (!isIndexLoaded()) {
 			setResults([])
 			setReelCountByAccount({})
@@ -420,6 +455,7 @@ export function ReelsHome() {
 		otherCategoryAccounts,
 		accountUsernames,
 		bookmarkMediaIds,
+		isNarrowViewport,
 	])
 
 	const runSourcesSubmitInBackground = (payload: {
@@ -469,11 +505,11 @@ export function ReelsHome() {
 		if (prev < 0) return
 		if (n <= prev) return
 		const added = n - prev
-		const cap = Math.min(added, REELS_PAGE_SIZE * 3)
+		const cap = Math.min(added, pageSize * 3)
 		setVisibleCount((c) =>
 			Math.min(c + cap, sortedFullRef.current.length),
 		)
-	}, [results.length])
+	}, [results.length, pageSize])
 
 	useEffect(() => {
 		if (detailIndex !== null && detailIndex >= sortedFull.length) {
@@ -495,6 +531,9 @@ export function ReelsHome() {
 	const visibleCountRef = useRef(visibleCount)
 	visibleCountRef.current = visibleCount
 
+	const pageSizeRef = useRef(pageSize)
+	pageSizeRef.current = pageSize
+
 	const tryLoadMoreReels = useCallback(() => {
 		const el = scrollRef.current
 		if (!el) return
@@ -503,7 +542,8 @@ export function ReelsHome() {
 		const { scrollTop, scrollHeight, clientHeight } = el
 		if (scrollHeight - scrollTop - clientHeight > REELS_SCROLL_LOAD_THRESHOLD_PX)
 			return
-		setVisibleCount((c) => Math.min(c + REELS_PAGE_SIZE, fullLen))
+		const step = pageSizeRef.current
+		setVisibleCount((c) => Math.min(c + step, fullLen))
 	}, [])
 
 	const [reelsScrollRootEl, setReelsScrollRootEl] =
@@ -514,7 +554,7 @@ export function ReelsHome() {
 	}, [])
 	const laneCount = useReelLaneCount()
 	const listVirtualEnabled =
-		!loading && sortedResults.length >= REELS_VIRTUAL_MIN_ITEMS
+		!loading && sortedResults.length >= virtualMinItems
 
 	const listInnerRef = useRef<HTMLDivElement | null>(null)
 	const [listInnerWidth, setListInnerWidth] = useState(0)
@@ -556,13 +596,14 @@ export function ReelsHome() {
 		getItemKey: (index) => sortedResults[index]?.id ?? index,
 		lanes: laneCount,
 		gap: REEL_MASONRY_GAP_PX,
-		overscan: 6,
+		overscan: isNarrowViewport ? 2 : 6,
 		paddingStart: 8,
 		paddingEnd: REEL_LIST_PADDING_END_PX,
 		measureElement,
-		useAnimationFrameWithResizeObserver: true,
+		// rAF+RO every frame is costly on low-end phones; desktop keeps smoother masonry measure.
+		useAnimationFrameWithResizeObserver: !isNarrowViewport,
 		useScrollendEvent: true,
-		isScrollingResetDelay: 220,
+		isScrollingResetDelay: isNarrowViewport ? 320 : 220,
 	})
 
 	useLayoutEffect(() => {
@@ -666,20 +707,21 @@ export function ReelsHome() {
 
 	const searchBarWrapRef = useRef<HTMLDivElement>(null)
 	const searchInputRef = useRef<HTMLInputElement>(null)
-	const [isNarrowViewport, setIsNarrowViewport] = useState(false)
 	const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
 
+	useEffect(() => {
+		if (!isNarrowViewport) setMobileSearchOpen(false)
+	}, [isNarrowViewport])
+
+	const wasNarrowViewportRef = useRef<boolean | null>(null)
 	useLayoutEffect(() => {
-		const mq = window.matchMedia("(max-width: 767px)")
-		const sync = () => {
-			const narrow = mq.matches
-			setIsNarrowViewport(narrow)
-			if (!narrow) setMobileSearchOpen(false)
-		}
-		sync()
-		mq.addEventListener("change", sync)
-		return () => mq.removeEventListener("change", sync)
-	}, [])
+		const was = wasNarrowViewportRef.current
+		wasNarrowViewportRef.current = isNarrowViewport
+		if (!isNarrowViewport) return
+		// Only clamp on first client paint as narrow — not when returning from landscape/desktop.
+		if (was !== null) return
+		setVisibleCount((c) => Math.min(c, REELS_PAGE_INITIAL_MOBILE))
+	}, [isNarrowViewport])
 
 	useEffect(() => {
 		if (!mobileSearchOpen || !isNarrowViewport) return
@@ -930,6 +972,7 @@ export function ReelsHome() {
 														sortedResults[vi.index].id,
 													)}
 													onToggleBookmark={toggleBookmarkMediaId}
+													narrowViewport={isNarrowViewport}
 												/>
 											</div>
 										)
@@ -952,6 +995,7 @@ export function ReelsHome() {
 												isDetailOpen={detailIndex === index}
 												isBookmarked={isBookmarkedMediaId(item.id)}
 												onToggleBookmark={toggleBookmarkMediaId}
+												narrowViewport={isNarrowViewport}
 											/>
 										</div>
 									))}

@@ -170,10 +170,19 @@ video.reel-modal-viewport-fill-video {
 	object-fit: contain;
 }
 
-/* Sonner: mobilde sağ üst toast’ları daha kompakt */
-@media (max-width: 639px) {
+/* Toaster: boş alandan tıkların geçmesi; sadece toast kartı etkileşim alır */
+[data-sonner-toaster] {
+	pointer-events: none;
+}
+
+[data-sonner-toaster] [data-sonner-toast] {
+	pointer-events: auto;
+}
+
+/* Sonner: mobilde altta kompakt; masaüstünde sağ üst daha dar */
+@media (max-width: 767px) {
 	[data-sonner-toaster] {
-		--width: min(92vw, 18rem);
+		--width: min(92vw, 20rem);
 		--gap: 6px;
 	}
 
@@ -212,6 +221,28 @@ video.reel-modal-viewport-fill-video {
 	}
 }
 
+@keyframes reel-detail-in-next-y {
+	from {
+		opacity: 0;
+		transform: translateY(1.25rem);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes reel-detail-in-prev-y {
+	from {
+		opacity: 0;
+		transform: translateY(-1.25rem);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
 @keyframes reel-detail-in-fade {
 	from {
 		opacity: 0;
@@ -231,6 +262,16 @@ video.reel-modal-viewport-fill-video {
 
 .reel-detail-enter-fade {
 	animation: reel-detail-in-fade 0.22s ease-out both;
+}
+
+@media (max-width: 767px) {
+	.reel-detail-enter-next {
+		animation: reel-detail-in-next-y 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+	}
+
+	.reel-detail-enter-prev {
+		animation: reel-detail-in-prev-y 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+	}
 }
 
 @media (prefers-reduced-motion: reduce) {

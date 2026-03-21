@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button"
 import {
 	Dialog,
+	DialogClose,
 	DialogContent,
 	DialogDescription,
 	DialogTitle,
@@ -24,13 +25,17 @@ import {
 	Maximize2,
 	Minimize2,
 	User,
+	XIcon,
 } from "lucide-react"
 import {
 	useCallback,
 	useEffect,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
+	useSyncExternalStore,
+	type RefObject,
 } from "react"
 import { createPortal } from "react-dom"
 
@@ -57,9 +62,175 @@ function formatDate(dateStr: string): string {
 const mediaFitClass =
 	"absolute inset-0 h-full w-full object-contain object-center"
 
+const NARROW_SWIPE_MQ = "(max-width: 767px)"
+
+function subscribeNarrowSwipe(cb: () => void) {
+	const mq = window.matchMedia(NARROW_SWIPE_MQ)
+	mq.addEventListener("change", cb)
+	return () => mq.removeEventListener("change", cb)
+}
+
+function narrowSwipeSnapshot() {
+	return window.matchMedia(NARROW_SWIPE_MQ).matches
+}
+
+/** Pixels from scroll top/bottom to treat as “at edge” for chaining to prev/next reel. */
+const DETAIL_SCROLL_EDGE_SLACK = 10
+/** If scroll position moved this much during the touch, the user was scrolling — reel change only on a fast flick. */
+const DETAIL_SCROLL_USED_SLACK = 8
+/** Min |dy| (px) for a reel swipe from the detail strip. */
+const DETAIL_SWIPE_MIN_DY = 58
+/**
+ * Velocity (px/ms) — separates slow scroll drags from reel flicks.
+ * After actual scrolling in the gesture, require a strong flick so scroll ≠ reel.
+ */
+const DETAIL_FLICK_AFTER_SCROLL_V = 0.46
+/** When the panel did not scroll during the touch, allow slower intentional swipes at the edge. */
+const DETAIL_EDGE_SWIPE_MIN_V = 0.14
+
+function useDetailPanelEdgeSwipeNav(
+	enabled: boolean,
+	scrollRef: RefObject<HTMLDivElement | null>,
+	handlePrev: () => void,
+	handleNext: () => void,
+) {
+	const touchStartRef = useRef<{
+		x: number
+		y: number
+		t: number
+		scrollTop0: number
+	} | null>(null)
+
+	return useMemo(
+		() => ({
+			onTouchStart: (e: React.TouchEvent) => {
+				if (!enabled || e.touches.length !== 1) return
+				const el = scrollRef.current
+				touchStartRef.current = {
+					x: e.touches[0].clientX,
+					y: e.touches[0].clientY,
+					t: Date.now(),
+					scrollTop0: el?.scrollTop ?? 0,
+				}
+			},
+			onTouchEnd: (e: React.TouchEvent) => {
+				if (!enabled) {
+					touchStartRef.current = null
+					return
+				}
+				const start = touchStartRef.current
+				touchStartRef.current = null
+				if (!start || e.changedTouches.length < 1) return
+
+				const el = scrollRef.current
+				if (!el) return
+
+				const t = e.changedTouches[0]
+				const dy = t.clientY - start.y
+				const dx = t.clientX - start.x
+				if (Math.abs(dy) < DETAIL_SWIPE_MIN_DY) return
+				if (Math.abs(dy) < Math.abs(dx) * 1.2) return
+
+				const dt = Math.max(1, Date.now() - start.t)
+				const velocity = Math.abs(dy) / dt
+
+				const scrollTop = el.scrollTop
+				const scrollUsed =
+					Math.abs(scrollTop - start.scrollTop0) > DETAIL_SCROLL_USED_SLACK
+				const minV = scrollUsed
+					? DETAIL_FLICK_AFTER_SCROLL_V
+					: DETAIL_EDGE_SWIPE_MIN_V
+				if (velocity < minV) return
+
+				const { scrollHeight, clientHeight } = el
+				const atTop = scrollTop <= DETAIL_SCROLL_EDGE_SLACK
+				const atBottom =
+					scrollTop + clientHeight >= scrollHeight - DETAIL_SCROLL_EDGE_SLACK
+
+				if (dy < 0) {
+					if (!atBottom) return
+					e.stopPropagation()
+					handleNext()
+				} else {
+					if (!atTop) return
+					e.stopPropagation()
+					handlePrev()
+				}
+			},
+			onTouchCancel: () => {
+				touchStartRef.current = null
+			},
+		}),
+		[enabled, scrollRef, handlePrev, handleNext],
+	)
+}
+
 /** Matches grid `MediaCard` bookmark control (glass pill). */
 const detailMediaChromeButtonClass =
-	"z-[4] flex size-7 cursor-pointer items-center justify-center rounded-full border border-border/40 bg-background/30 text-foreground shadow-sm backdrop-blur-md transition-[background-color,box-shadow] hover:bg-background/45 hover:shadow-md active:scale-95"
+	"z-[4] flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/40 bg-background/30 text-foreground shadow-sm backdrop-blur-md transition-[background-color,box-shadow] hover:bg-background/45 hover:shadow-md active:scale-95"
+
+function PostDetailSidebarContent({
+	item,
+	fullDescription,
+}: {
+	item: MediaItem
+	fullDescription: string
+}) {
+	return (
+		<>
+			<div className="flex items-start gap-2">
+				<User
+					className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+					aria-hidden
+				/>
+				<div className="min-w-0">
+					<p className="font-semibold leading-tight">
+						{item.fullname || item.username}
+					</p>
+					<p className="text-sm text-muted-foreground">@{item.username}</p>
+				</div>
+			</div>
+
+			<p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+				{fullDescription}
+			</p>
+
+			{item.tags.length > 0 && (
+				<div className="flex flex-wrap gap-1.5">
+					{item.tags.map((tag) => (
+						<span
+							key={tag}
+							className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
+						>
+							#{tag}
+						</span>
+					))}
+				</div>
+			)}
+
+			<div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+				<span className="inline-flex items-center gap-1.5">
+					<Calendar className="size-4 shrink-0" />
+					{formatDate(item.post_date)}
+				</span>
+				<span className="inline-flex items-center gap-1.5">
+					<Heart className="size-4 shrink-0" strokeWidth={1.8} />
+					{item.likes > 0 ? item.likes.toLocaleString("en-US") : "0"} likes
+				</span>
+			</div>
+
+			<a
+				href={item.post_url}
+				target="_blank"
+				rel="noopener noreferrer"
+				className="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+			>
+				<ExternalLink className="size-4" />
+				Open on Instagram
+			</a>
+		</>
+	)
+}
 
 export interface PostDetailDialogProps {
 	item: MediaItem
@@ -244,6 +415,15 @@ export function PostDetailDialog({
 		void v.play().catch(() => {})
 	}, [])
 
+	const toggleVideoPlayPause = useCallback(
+		(e: React.MouseEvent<HTMLVideoElement>) => {
+			const v = e.currentTarget
+			if (v.paused) void v.play().catch(() => {})
+			else v.pause()
+		},
+		[],
+	)
+
 	/** Autoplay when the dialog opens or when navigating to another reel (prev/next). */
 	useEffect(() => {
 		if (!open || !hasVideo || viewportFillOpen) return
@@ -279,6 +459,65 @@ export function PostDetailDialog({
 		onGoNext()
 	}, [canGoNext, onGoNext])
 
+	const narrowForSwipe = useSyncExternalStore(
+		subscribeNarrowSwipe,
+		narrowSwipeSnapshot,
+		() => false,
+	)
+
+	const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+	const verticalSwipeHandlers = useMemo(
+		() => ({
+			onTouchStart: (e: React.TouchEvent) => {
+				if (e.touches.length !== 1) return
+				touchStartRef.current = {
+					x: e.touches[0].clientX,
+					y: e.touches[0].clientY,
+				}
+			},
+			onTouchEnd: (e: React.TouchEvent) => {
+				const start = touchStartRef.current
+				touchStartRef.current = null
+				if (!start || e.changedTouches.length < 1) return
+				const t = e.changedTouches[0]
+				const dy = t.clientY - start.y
+				const dx = t.clientX - start.x
+				if (Math.abs(dy) < 56) return
+				if (Math.abs(dy) < Math.abs(dx) * 1.2) return
+				if (dy < 0) handleNext()
+				else handlePrev()
+			},
+		}),
+		[handlePrev, handleNext],
+	)
+
+	const modalSwipeProps =
+		open && narrowForSwipe && !viewportFillOpen
+			? verticalSwipeHandlers
+			: undefined
+
+	const fullscreenSwipeProps =
+		open && narrowForSwipe && viewportFillOpen
+			? verticalSwipeHandlers
+			: undefined
+
+	const modalDetailScrollRef = useRef<HTMLDivElement>(null)
+	const fullscreenDetailScrollRef = useRef<HTMLDivElement>(null)
+
+	const modalDetailSwipeNav = useDetailPanelEdgeSwipeNav(
+		open && narrowForSwipe && !viewportFillOpen,
+		modalDetailScrollRef,
+		handlePrev,
+		handleNext,
+	)
+
+	const fullscreenDetailSwipeNav = useDetailPanelEdgeSwipeNav(
+		open && narrowForSwipe && viewportFillOpen,
+		fullscreenDetailScrollRef,
+		handlePrev,
+		handleNext,
+	)
+
 	const handleOpenChange = (next: boolean) => {
 		onOpenChange(next)
 		if (!next) {
@@ -300,11 +539,21 @@ export function PostDetailDialog({
 			}
 			const left = e.key === "ArrowLeft" || e.code === "ArrowLeft"
 			const right = e.key === "ArrowRight" || e.code === "ArrowRight"
+			const up = e.key === "ArrowUp" || e.code === "ArrowUp"
+			const down = e.key === "ArrowDown" || e.code === "ArrowDown"
 			if (left && canGoPrev) {
 				e.preventDefault()
 				e.stopPropagation()
 				handlePrev()
 			} else if (right && canGoNext) {
+				e.preventDefault()
+				e.stopPropagation()
+				handleNext()
+			} else if (down && canGoPrev) {
+				e.preventDefault()
+				e.stopPropagation()
+				handlePrev()
+			} else if (up && canGoNext) {
 				e.preventDefault()
 				e.stopPropagation()
 				handleNext()
@@ -331,9 +580,21 @@ export function PostDetailDialog({
 	return (
 		<Dialog open={open} onOpenChange={handleOpenChange}>
 			<DialogContent
-				showCloseButton
+				showCloseButton={false}
 				className="flex max-h-[min(94vh,940px)] w-[min(98vw,1080px)] max-w-[min(98vw,1080px)] flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-[min(98vw,1080px)]"
 			>
+				<DialogClose
+					render={
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							className="absolute top-3 left-3 z-[60] border border-border/50 bg-background/85 shadow-sm backdrop-blur-md md:left-auto md:right-3 md:top-3"
+						/>
+					}
+				>
+					<XIcon />
+					<span className="sr-only">Close</span>
+				</DialogClose>
 				<DialogTitle className="sr-only">
 					@{item.username} — {truncate(fullDescription, 80)}
 				</DialogTitle>
@@ -352,8 +613,11 @@ export function PostDetailDialog({
 					)}
 				>
 					{/* Media fills column; video uses natural aspect inside box (no fixed 9:16 — avoids tiny letterboxing). */}
-					<div className="relative flex min-h-0 w-full flex-1 shrink-0 flex-col bg-black max-md:min-h-[min(62vh,720px)] md:h-full md:max-h-full md:flex-none">
-						{canGoPrev ? (
+					<div
+						className="relative flex min-h-0 w-full flex-1 shrink-0 flex-col bg-black max-md:min-h-[min(62vh,720px)] md:h-full md:max-h-full md:flex-none"
+						{...modalSwipeProps}
+					>
+						{!narrowForSwipe && canGoPrev ? (
 							<Button
 								type="button"
 								variant="ghost"
@@ -368,7 +632,7 @@ export function PostDetailDialog({
 								<ChevronLeft className="size-6" strokeWidth={2.25} />
 							</Button>
 						) : null}
-						{canGoNext ? (
+						{!narrowForSwipe && canGoNext ? (
 							<Button
 								type="button"
 								variant="ghost"
@@ -383,51 +647,57 @@ export function PostDetailDialog({
 								<ChevronRight className="size-6" strokeWidth={2.25} />
 							</Button>
 						) : null}
-						{hasVideo && !viewportFillOpen ? (
-							<button
-								type="button"
-								className={cn(
-									"absolute left-1.5 top-1.5 z-[40]",
-									detailMediaChromeButtonClass,
-								)}
-								title="Fill screen"
-								aria-label="Fill screen with video"
-								onClick={(e) => {
-									e.preventDefault()
-									e.stopPropagation()
-									enterViewportFill()
-								}}
-							>
-								<Maximize2 className="size-3.5" strokeWidth={2} />
-							</button>
-						) : null}
-						{onToggleBookmark ? (
-							<button
-								type="button"
-								className={cn(
-									"absolute right-1.5 top-1.5 z-[40]",
-									detailMediaChromeButtonClass,
-									isBookmarked && "text-amber-600",
-								)}
-								title={
-									isBookmarked ? "Remove from bookmarks" : "Save to bookmarks"
-								}
-								aria-label={
-									isBookmarked ? "Remove from bookmarks" : "Save to bookmarks"
-								}
-								aria-pressed={isBookmarked}
-								onClick={(e) => {
-									e.preventDefault()
-									e.stopPropagation()
-									onToggleBookmark(item.id)
-								}}
-							>
-								<Bookmark
-									className={cn("size-3.5", isBookmarked && "fill-amber-400")}
-									strokeWidth={2}
-								/>
-							</button>
-						) : null}
+						<div className="absolute top-3 right-3 z-50 flex flex-row flex-nowrap items-center gap-2 md:static md:contents">
+							{hasVideo && !viewportFillOpen ? (
+								<button
+									type="button"
+									className={cn(
+										detailMediaChromeButtonClass,
+										"md:absolute md:left-1.5 md:top-1.5",
+									)}
+									title="Fill screen"
+									aria-label="Fill screen with video"
+									onClick={(e) => {
+										e.preventDefault()
+										e.stopPropagation()
+										enterViewportFill()
+									}}
+								>
+									<Maximize2 className="size-3.5" strokeWidth={2} />
+								</button>
+							) : null}
+							{onToggleBookmark ? (
+								<button
+									type="button"
+									className={cn(
+										detailMediaChromeButtonClass,
+										isBookmarked && "text-amber-600",
+										"md:absolute md:right-1.5 md:top-1.5",
+									)}
+									title={
+										isBookmarked
+											? "Remove from bookmarks"
+											: "Save to bookmarks"
+									}
+									aria-label={
+										isBookmarked
+											? "Remove from bookmarks"
+											: "Save to bookmarks"
+									}
+									aria-pressed={isBookmarked}
+									onClick={(e) => {
+										e.preventDefault()
+										e.stopPropagation()
+										onToggleBookmark(item.id)
+									}}
+								>
+									<Bookmark
+										className={cn("size-3.5", isBookmarked && "fill-amber-400")}
+										strokeWidth={2}
+									/>
+								</button>
+							) : null}
+						</div>
 
 						<div
 							className={cn(
@@ -443,7 +713,7 @@ export function PostDetailDialog({
 											<video
 												ref={modalVideoRef}
 												className={cn(
-													"reel-modal-dialog-video absolute left-1/2 top-1/2 z-[2] max-h-full max-w-full -translate-x-1/2 -translate-y-1/2 object-contain",
+													"reel-modal-dialog-video absolute left-1/2 top-1/2 z-[2] max-h-full max-w-full -translate-x-1/2 -translate-y-1/2 cursor-pointer object-contain",
 													modalVideoReady
 														? "opacity-100"
 														: "pointer-events-none opacity-0",
@@ -456,6 +726,7 @@ export function PostDetailDialog({
 												controlsList="nofullscreen"
 												preload="auto"
 												playsInline
+												onClick={toggleVideoPlayPause}
 												onLoadedData={() => {
 													setModalVideoReady(true)
 												}}
@@ -474,11 +745,18 @@ export function PostDetailDialog({
 													alt=""
 													className={cn(
 														"absolute left-1/2 top-1/2 z-[3] max-h-full max-w-full -translate-x-1/2 -translate-y-1/2 object-contain transition-opacity duration-150",
-														modalVideoReady &&
-															"pointer-events-none z-[1] opacity-0",
+														modalVideoReady
+															? "pointer-events-none z-[1] opacity-0"
+															: "cursor-pointer",
 													)}
 													decoding="async"
 													referrerPolicy="no-referrer"
+													onClick={() => {
+														const v = modalVideoRef.current
+														if (!v) return
+														if (v.paused) void v.play().catch(() => {})
+														else v.pause()
+													}}
 												/>
 											) : null}
 										</>
@@ -486,29 +764,73 @@ export function PostDetailDialog({
 									{viewportFillOpen && portalReady
 										? createPortal(
 												<div
-													className="fixed inset-0 z-[200] flex flex-col bg-black"
+													className="fixed inset-0 z-[200] flex h-dvh max-h-dvh min-h-0 flex-col bg-black pt-[env(safe-area-inset-top,0px)]"
 													role="presentation"
 												>
-													<button
-														type="button"
+													<div
 														className={cn(
-															"absolute right-2 top-2 z-10",
-															detailMediaChromeButtonClass,
+															"pointer-events-none absolute left-0 right-0 top-2 z-10 flex items-start gap-2 p-2",
+															onToggleBookmark ? "justify-between" : "justify-start",
 														)}
-														title="Exit fill screen"
-														aria-label="Exit fill screen"
-														onClick={(e) => {
-															e.preventDefault()
-															e.stopPropagation()
-															exitViewportFill()
-														}}
 													>
-														<Minimize2 className="size-3.5" strokeWidth={2} />
-													</button>
-													<div className="flex min-h-0 flex-1 items-center justify-center p-2">
+														<button
+															type="button"
+															className={cn(
+																"pointer-events-auto",
+																detailMediaChromeButtonClass,
+															)}
+															title="Exit fill screen"
+															aria-label="Exit fill screen"
+															onClick={(e) => {
+																e.preventDefault()
+																e.stopPropagation()
+																exitViewportFill()
+															}}
+														>
+															<Minimize2 className="size-3.5" strokeWidth={2} />
+														</button>
+														{onToggleBookmark ? (
+															<button
+																type="button"
+																className={cn(
+																	"pointer-events-auto",
+																	detailMediaChromeButtonClass,
+																	isBookmarked && "text-amber-600",
+																)}
+																title={
+																	isBookmarked
+																		? "Remove from bookmarks"
+																		: "Save to bookmarks"
+																}
+																aria-label={
+																	isBookmarked
+																		? "Remove from bookmarks"
+																		: "Save to bookmarks"
+																}
+																aria-pressed={isBookmarked}
+																onClick={(e) => {
+																	e.preventDefault()
+																	e.stopPropagation()
+																	onToggleBookmark(item.id)
+																}}
+															>
+																<Bookmark
+																	className={cn(
+																		"size-3.5",
+																		isBookmarked && "fill-amber-400",
+																	)}
+																	strokeWidth={2}
+																/>
+															</button>
+														) : null}
+													</div>
+													<div
+														className="flex min-h-0 flex-1 items-center justify-center px-2 pb-2 pt-11"
+														{...fullscreenSwipeProps}
+													>
 														<video
 															ref={expandedVideoRef}
-															className="reel-modal-viewport-fill-video z-[1]"
+															className="reel-modal-viewport-fill-video z-[1] cursor-pointer"
 															src={item.video_url}
 															poster={thumbForLayer ? undefined : posterAttr}
 															muted={false}
@@ -516,6 +838,7 @@ export function PostDetailDialog({
 															controlsList="nofullscreen"
 															preload="auto"
 															playsInline
+															onClick={toggleVideoPlayPause}
 															onPlay={() => setPlayingId(item.id)}
 															onPause={() => {
 																if (playingId === item.id) setPlayingId(null)
@@ -523,6 +846,16 @@ export function PostDetailDialog({
 														>
 															Your browser does not support the video tag.
 														</video>
+													</div>
+													<div
+														ref={fullscreenDetailScrollRef}
+														className="flex max-h-[min(44dvh,480px)] min-h-0 w-full shrink-0 flex-col gap-3 overflow-y-auto border-t border-border bg-background px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] text-foreground"
+														{...fullscreenDetailSwipeNav}
+													>
+														<PostDetailSidebarContent
+															item={item}
+															fullDescription={fullDescription}
+														/>
 													</div>
 												</div>,
 												document.body,
@@ -541,63 +874,18 @@ export function PostDetailDialog({
 						</div>
 					</div>
 
-					<div className="flex max-h-[min(32vh,380px)] min-h-0 w-full shrink-0 flex-col gap-3 overflow-y-auto border-t border-border p-4 md:max-h-full md:min-h-0 md:min-w-0 md:border-t-0 md:border-l">
-						<div className="flex items-start gap-2">
-							<User
-								className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-								aria-hidden
-							/>
-							<div className="min-w-0">
-								<p className="font-semibold leading-tight">
-									{item.fullname || item.username}
-								</p>
-								<p className="text-sm text-muted-foreground">
-									@{item.username}
-								</p>
-							</div>
-						</div>
-
-						<p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-							{fullDescription}
-						</p>
-
-						{item.tags.length > 0 && (
-							<div className="flex flex-wrap gap-1.5">
-								{item.tags.map((tag) => (
-									<span
-										key={tag}
-										className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
-									>
-										#{tag}
-									</span>
-								))}
-							</div>
-						)}
-
-						<div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-							<span className="inline-flex items-center gap-1.5">
-								<Calendar className="size-4 shrink-0" />
-								{formatDate(item.post_date)}
-							</span>
-							<span className="inline-flex items-center gap-1.5">
-								<Heart className="size-4 shrink-0" strokeWidth={1.8} />
-								{item.likes > 0
-									? item.likes.toLocaleString("en-US")
-									: "0"}{" "}
-								likes
-							</span>
-						</div>
-
-						<a
-							href={item.post_url}
-							target="_blank"
-							rel="noopener noreferrer"
-							className="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+					{!viewportFillOpen ? (
+						<div
+							ref={modalDetailScrollRef}
+							className="flex max-h-[min(32vh,380px)] min-h-0 w-full shrink-0 flex-col gap-3 overflow-y-auto border-t border-border p-4 md:max-h-full md:min-h-0 md:min-w-0 md:border-t-0 md:border-l"
+							{...modalDetailSwipeNav}
 						>
-							<ExternalLink className="size-4" />
-							Open on Instagram
-						</a>
-					</div>
+							<PostDetailSidebarContent
+								item={item}
+								fullDescription={fullDescription}
+							/>
+						</div>
+					) : null}
 				</div>
 			</DialogContent>
 		</Dialog>

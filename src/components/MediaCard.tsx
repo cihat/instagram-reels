@@ -11,7 +11,13 @@ import {
 import type { MediaItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Bookmark, Calendar, Heart, Volume2, VolumeX } from "lucide-react"
-import { useEffect, useRef, useState, type CSSProperties } from "react"
+import {
+	memo,
+	useEffect,
+	useRef,
+	useState,
+	type CSSProperties,
+} from "react"
 
 interface MediaCardProps {
 	item: MediaItem
@@ -23,6 +29,8 @@ interface MediaCardProps {
 	isDetailOpen?: boolean
 	isBookmarked?: boolean
 	onToggleBookmark?: (mediaId: string) => void
+	/** Tighter visibility margins, lighter chrome — mobile grid perf. */
+	narrowViewport?: boolean
 	className?: string
 }
 
@@ -62,6 +70,9 @@ const mediaFitClass =
 const mediaChromeButtonClass =
 	"z-[4] flex size-7 cursor-pointer items-center justify-center rounded-full border border-border/40 bg-background/30 text-foreground shadow-sm backdrop-blur-md transition-[background-color,box-shadow] hover:bg-background/45 hover:shadow-md active:scale-95"
 
+const mediaChromeButtonClassNarrow =
+	"z-[4] flex size-7 cursor-pointer items-center justify-center rounded-full border border-border/40 bg-background/55 text-foreground shadow-sm transition-[background-color,box-shadow] hover:bg-background/70 hover:shadow-md active:scale-95"
+
 function shouldIgnoreCardClick(target: EventTarget | null): boolean {
 	if (!(target instanceof HTMLElement)) return false
 	return Boolean(
@@ -71,7 +82,7 @@ function shouldIgnoreCardClick(target: EventTarget | null): boolean {
 	)
 }
 
-export function MediaCard({
+function MediaCardInner({
 	item,
 	listIndex,
 	onOpenDetail,
@@ -79,6 +90,7 @@ export function MediaCard({
 	isDetailOpen = false,
 	isBookmarked = false,
 	onToggleBookmark,
+	narrowViewport = false,
 	className,
 }: MediaCardProps) {
 	const snippet = truncate(item.description || "No description", 100)
@@ -115,10 +127,20 @@ export function MediaCard({
 	const frameStyle = aspectRatioStyle(item.width, item.height)
 
 	const reelsScrollRoot = useReelsScrollRoot()
+	const inViewRootMargin = narrowViewport ? "96px 0px" : "280px 0px"
+
 	const { ref, inView } = useInView({
 		root: reelsScrollRoot,
-		rootMargin: "320px 0px",
+		rootMargin: inViewRootMargin,
 	})
+
+	const videoSrc =
+		hasVideo && inView ? item.video_url?.trim() || "" : ""
+
+	useEffect(() => {
+		if (inView) return
+		setVideoSurfaceReady(false)
+	}, [inView])
 
 	const videoRef = useRef<HTMLVideoElement>(null)
 	const wasInViewRef = useRef(false)
@@ -232,7 +254,9 @@ export function MediaCard({
 							data-prevent-card-open
 							className={cn(
 								"absolute right-1.5 top-1.5",
-								mediaChromeButtonClass,
+								narrowViewport
+									? mediaChromeButtonClassNarrow
+									: mediaChromeButtonClass,
 								isBookmarked && "text-amber-600",
 							)}
 							title={
@@ -260,6 +284,7 @@ export function MediaCard({
 							style={frameStyle}
 						>
 							<video
+								key={item.id}
 								ref={videoRef}
 								className={cn(
 									mediaFitClass,
@@ -268,14 +293,20 @@ export function MediaCard({
 										? "z-[2] opacity-100"
 										: "z-0 opacity-0 pointer-events-none",
 								)}
-								src={item.video_url}
+								src={videoSrc || undefined}
 								poster={thumbForLayer ? undefined : posterAttr}
 								width={videoWidthAttr}
 								height={videoHeightAttr}
-								autoPlay
+								autoPlay={Boolean(videoSrc)}
 								muted={!isGridAudible}
 								loop
-								preload={inView ? "metadata" : "none"}
+								preload={
+									videoSrc
+										? narrowViewport
+											? "none"
+											: "metadata"
+										: "none"
+								}
 								playsInline
 								onLoadedData={() => setVideoSurfaceReady(true)}
 								onError={() => setVideoSurfaceReady(true)}
@@ -322,7 +353,9 @@ export function MediaCard({
 								data-prevent-card-open
 								className={cn(
 									"absolute bottom-1.5 right-1.5",
-									mediaChromeButtonClass,
+									narrowViewport
+										? mediaChromeButtonClassNarrow
+										: mediaChromeButtonClass,
 									gridSoundOn && "text-primary",
 									gridVideoSuspended &&
 										"pointer-events-none opacity-40",
@@ -438,3 +471,5 @@ export function MediaCard({
 		</Card>
 	)
 }
+
+export const MediaCard = memo(MediaCardInner)
