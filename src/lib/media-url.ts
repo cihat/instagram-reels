@@ -13,3 +13,15 @@ export function proxiedImageUrl(raw: string | undefined | null): string | undefi
 		return undefined
 	}
 }
+
+/** Same-origin absolute URL — helps some PWA / strict contexts resolve the proxy reliably. */
+export function proxiedImageUrlAbsolute(
+	raw: string | undefined | null,
+	origin: string | undefined,
+): string | undefined {
+	const rel = proxiedImageUrl(raw)
+	if (!rel) return undefined
+	const o = origin?.replace(/\/$/, "").trim()
+	if (!o) return rel
+	return `${o}${rel}`
+}

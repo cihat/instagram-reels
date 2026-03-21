@@ -1,7 +1,15 @@
+import { instagramCookieHeaderFromUserInput } from "@/lib/instagram-cookie-input"
 import { NextResponse } from "next/server"
 
 const UA =
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+function instagramCookieForUpstream(): string | undefined {
+	const raw = process.env.INSTAGRAM_COOKIES
+	if (typeof raw !== "string" || !raw.trim()) return undefined
+	const parsed = instagramCookieHeaderFromUserInput(raw)
+	return (parsed ?? raw).trim() || undefined
+}
 
 function isAllowedInstagramMediaHost(hostname: string): boolean {
 	const h = hostname.toLowerCase()
@@ -33,26 +41,45 @@ export async function GET(request: Request) {
 		return NextResponse.json({ error: "host not allowed" }, { status: 403 })
 	}
 
+	const cookie = instagramCookieForUpstream()
+	const headers: Record<string, string> = {
+		"User-Agent": UA,
+		Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+		"Accept-Language": "en-US,en;q=0.9",
+		Referer: "https://www.instagram.com/",
+		"Sec-Fetch-Dest": "image",
+		"Sec-Fetch-Mode": "no-cors",
+		"Sec-Fetch-Site": "cross-site",
+	}
+	if (cookie) {
+		headers.Cookie = cookie
+		headers.Origin = "https://www.instagram.com"
+	}
+
 	const upstream = await fetch(target.href, {
-		headers: {
-			"User-Agent": UA,
-			Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-			"Accept-Language": "en-US,en;q=0.9",
-			Referer: "https://www.instagram.com/",
-		},
+		headers,
 		cache: "no-store",
 	})
 
 	if (!upstream.ok) {
-		return new NextResponse(null, { status: upstream.status })
+		return new NextResponse(null, {
+			status: upstream.status,
+			headers: { "Cache-Control": "private, no-store" },
+		})
 	}
 
 	const contentType = upstream.headers.get("content-type") || "image/jpeg"
+	// Session cookie may affect the bytes; avoid shared edge caches mixing users.
+	const cacheControl = cookie
+		? "private, max-age=86400"
+		: "public, max-age=86400, s-maxage=86400"
+	const okHeaders: Record<string, string> = {
+		"Content-Type": contentType,
+		"Cache-Control": cacheControl,
+	}
+	if (cookie) okHeaders.Vary = "Cookie"
 	return new NextResponse(upstream.body, {
 		status: 200,
-		headers: {
-			"Content-Type": contentType,
-			"Cache-Control": "public, max-age=86400, s-maxage=86400",
-		},
+		headers: okHeaders,
 	})
 }

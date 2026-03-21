@@ -10,7 +10,10 @@ import {
 import { usePlayingVideo } from "@/contexts/PlayingVideoContext"
 import { useReelsScrollRoot } from "@/contexts/ReelsScrollRootContext"
 import { useInView } from "@/hooks/useInView"
-import { proxiedImageUrl } from "@/lib/media-url"
+import {
+	proxiedImageUrl,
+	proxiedImageUrlAbsolute,
+} from "@/lib/media-url"
 import type { MediaItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Calendar, ExternalLink, Heart, User } from "lucide-react"
@@ -67,38 +70,47 @@ export function MediaCard({ item, className }: MediaCardProps) {
 	const snippet = truncate(item.description || "No description", 100)
 	const hasVideo = Boolean(item.video_url?.trim())
 	const rawThumb = item.display_url?.trim() || ""
-	const proxiedThumb = proxiedImageUrl(rawThumb)
-	const posterAttr = proxiedThumb ?? (rawThumb || undefined)
-	const [imgSrc, setImgSrc] = useState(
-		() => (proxiedThumb ?? rawThumb) || "",
-	)
+	const thumbForLayer = rawThumb.length > 0
 
-	const [videoDims, setVideoDims] = useState<{
-		width: number
-		height: number
-	} | null>(null)
+	const [imgOrigin, setImgOrigin] = useState("")
+	useEffect(() => {
+		setImgOrigin(typeof window !== "undefined" ? window.location.origin : "")
+	}, [])
+
+	const [imgSrc, setImgSrc] = useState("")
+	useEffect(() => {
+		const abs = proxiedImageUrlAbsolute(rawThumb, imgOrigin || undefined)
+		const rel = proxiedImageUrl(rawThumb)
+		setImgSrc(abs || rel || rawThumb || "")
+	}, [rawThumb, imgOrigin])
+
+	const posterAttr =
+		proxiedImageUrlAbsolute(rawThumb, imgOrigin || undefined) ??
+		proxiedImageUrl(rawThumb) ??
+		(rawThumb.length > 0 ? rawThumb : undefined)
+
+	const [videoSurfaceReady, setVideoSurfaceReady] = useState(false)
+	const [modalVideoReady, setModalVideoReady] = useState(false)
+	useEffect(() => {
+		setVideoSurfaceReady(false)
+		setModalVideoReady(false)
+	}, [item.id])
 
 	const [detailOpen, setDetailOpen] = useState(false)
 
-	const frameW = videoDims?.width ?? item.width
-	const frameH = videoDims?.height ?? item.height
-	const frameStyle = aspectRatioStyle(frameW, frameH)
-
-	useEffect(() => {
-		const p = proxiedImageUrl(rawThumb)
-		setImgSrc((p ?? rawThumb) || "")
-	}, [rawThumb])
+	// Keep aspect ratio fixed from index metadata only — using decoded video dimensions
+	// changes the box after load and retriggers virtualizer measure (scroll jump).
+	const frameStyle = aspectRatioStyle(item.width, item.height)
 
 	const reelsScrollRoot = useReelsScrollRoot()
 	const { ref, inView } = useInView({
 		root: reelsScrollRoot,
 		rootMargin: "320px 0px",
 	})
-	/** Stays true after first in-view; avoids flicker at the visibility boundary */
-	const [mediaRevealed, setMediaRevealed] = useState(false)
+
 	useEffect(() => {
-		if (inView) setMediaRevealed(true)
-	}, [inView])
+		if (!detailOpen) setModalVideoReady(false)
+	}, [detailOpen])
 
 	const videoRef = useRef<HTMLVideoElement>(null)
 	const modalVideoRef = useRef<HTMLVideoElement>(null)
@@ -182,48 +194,29 @@ export function MediaCard({ item, className }: MediaCardProps) {
 				)}
 			>
 				<CardContent className="min-h-0 p-0" ref={ref}>
-					{!mediaRevealed ? (
+					{hasVideo ? (
 						<div
-							className={cn(
-								mediaFrameClass,
-								"flex items-center justify-center",
-							)}
-							style={aspectRatioStyle(item.width, item.height)}
+							className={cn(mediaFrameClass, "isolate")}
+							style={frameStyle}
 						>
-							<span className="text-muted-foreground text-xs">
-								Loading…
-							</span>
-						</div>
-					) : hasVideo ? (
-						<div className={mediaFrameClass} style={frameStyle}>
 							<video
 								ref={videoRef}
-								className={cn(mediaFitClass, "reel-grid-video")}
+								className={cn(
+									mediaFitClass,
+									"reel-grid-video",
+									videoSurfaceReady
+										? "z-[2] opacity-100"
+										: "z-0 opacity-0 pointer-events-none",
+								)}
 								src={item.video_url}
-								poster={posterAttr}
+								poster={thumbForLayer ? undefined : posterAttr}
 								width={videoWidthAttr}
 								height={videoHeightAttr}
 								controls
-								preload="metadata"
+								preload={inView ? "metadata" : "none"}
 								playsInline
-								onLoadedMetadata={(e) => {
-									const v = e.currentTarget
-									const hasItemDims =
-										item.width &&
-										item.height &&
-										item.width > 0 &&
-										item.height > 0
-									if (
-										!hasItemDims &&
-										v.videoWidth > 0 &&
-										v.videoHeight > 0
-									) {
-										setVideoDims({
-											width: v.videoWidth,
-											height: v.videoHeight,
-										})
-									}
-								}}
+								onLoadedData={() => setVideoSurfaceReady(true)}
+								onError={() => setVideoSurfaceReady(true)}
 								onPlay={() => setPlayingId(item.id)}
 								onPause={() => {
 									if (playingId === item.id) setPlayingId(null)
@@ -231,21 +224,59 @@ export function MediaCard({ item, className }: MediaCardProps) {
 							>
 								Your browser does not support the video tag.
 							</video>
+							{thumbForLayer ? (
+								// eslint-disable-next-line @next/next/no-img-element -- proxy / external CDN
+								<img
+									src={imgSrc || rawThumb}
+									alt=""
+									className={cn(
+										mediaFitClass,
+										"transition-opacity duration-150",
+										videoSurfaceReady
+											? "z-[1] opacity-0 pointer-events-none"
+											: "z-[3]",
+									)}
+									loading="lazy"
+									decoding="async"
+									referrerPolicy="no-referrer"
+									onError={() => {
+										const abs = proxiedImageUrlAbsolute(
+											rawThumb,
+											imgOrigin || undefined,
+										)
+										const rel = proxiedImageUrl(rawThumb)
+										if (abs && imgSrc === abs && rel) {
+											setImgSrc(rel)
+											return
+										}
+										if (rawThumb && imgSrc !== rawThumb) {
+											setImgSrc(rawThumb)
+										}
+									}}
+								/>
+							) : null}
 						</div>
 					) : rawThumb ? (
-						<div
-							className={cn(mediaFrameClass, "block")}
-							style={aspectRatioStyle(item.width, item.height)}
-						>
+						<div className={cn(mediaFrameClass, "block")} style={frameStyle}>
 							{/* eslint-disable-next-line @next/next/no-img-element -- proxy / external CDN */}
 							<img
 								src={imgSrc || rawThumb}
 								alt=""
 								className={mediaFitClass}
 								loading="lazy"
+								decoding="async"
 								referrerPolicy="no-referrer"
 								onError={() => {
-									if (imgSrc && rawThumb && imgSrc !== rawThumb) {
+									const abs = proxiedImageUrlAbsolute(
+										rawThumb,
+										imgOrigin || undefined,
+									)
+									const rel = proxiedImageUrl(rawThumb)
+									if (abs && imgSrc === abs && rel) {
+										setImgSrc(rel)
+										return
+									}
+									if (rawThumb && imgSrc !== rawThumb) {
 										setImgSrc(rawThumb)
 									}
 								}}
@@ -257,7 +288,7 @@ export function MediaCard({ item, className }: MediaCardProps) {
 								mediaFrameClass,
 								"flex items-center justify-center text-muted-foreground text-xs",
 							)}
-							style={aspectRatioStyle(item.width, item.height)}
+							style={frameStyle}
 						>
 							Video
 						</div>
@@ -311,25 +342,48 @@ export function MediaCard({ item, className }: MediaCardProps) {
 					</DialogDescription>
 
 					<div className="flex min-h-0 flex-1 flex-col md:flex-row md:max-h-[min(88vh,860px)]">
-						<div className="flex min-h-[200px] flex-1 items-center justify-center bg-black md:min-h-0 md:max-w-[min(48%,420px)]">
+						<div className="relative flex min-h-[200px] flex-1 items-center justify-center bg-black md:min-h-0 md:max-w-[min(48%,420px)]">
 							{hasVideo ? (
-								<video
-									ref={modalVideoRef}
-									className="reel-grid-video max-h-[min(50vh,720px)] w-full max-w-full object-contain md:max-h-[min(82vh,800px)]"
-									src={item.video_url}
-									poster={posterAttr}
-									width={videoWidthAttr}
-									height={videoHeightAttr}
-									controls
-									preload="metadata"
-									playsInline
-									onPlay={() => setPlayingId(item.id)}
-									onPause={() => {
-										if (playingId === item.id) setPlayingId(null)
-									}}
-								>
-									Your browser does not support the video tag.
-								</video>
+								<div className="relative flex h-full min-h-[200px] w-full items-center justify-center">
+									<video
+										ref={modalVideoRef}
+										className={cn(
+											"reel-grid-video max-h-[min(50vh,720px)] w-full max-w-full object-contain md:max-h-[min(82vh,800px)]",
+											modalVideoReady
+												? "relative z-[2] opacity-100"
+												: "absolute inset-0 z-0 mx-auto max-h-[min(50vh,720px)] w-full max-w-full object-contain opacity-0 pointer-events-none md:max-h-[min(82vh,800px)]",
+										)}
+										src={item.video_url}
+										poster={thumbForLayer ? undefined : posterAttr}
+										width={videoWidthAttr}
+										height={videoHeightAttr}
+										controls
+										preload="metadata"
+										playsInline
+										onLoadedData={() => setModalVideoReady(true)}
+										onError={() => setModalVideoReady(true)}
+										onPlay={() => setPlayingId(item.id)}
+										onPause={() => {
+											if (playingId === item.id) setPlayingId(null)
+										}}
+									>
+										Your browser does not support the video tag.
+									</video>
+									{thumbForLayer ? (
+										// eslint-disable-next-line @next/next/no-img-element -- proxy / external CDN
+										<img
+											src={imgSrc || rawThumb}
+											alt=""
+											className={cn(
+												"absolute inset-0 z-[3] m-auto max-h-[min(50vh,720px)] w-full max-w-full object-contain transition-opacity duration-150 md:max-h-[min(82vh,800px)]",
+												modalVideoReady &&
+													"z-[1] opacity-0 pointer-events-none",
+											)}
+											decoding="async"
+											referrerPolicy="no-referrer"
+										/>
+									) : null}
+								</div>
 							) : rawThumb ? (
 								// eslint-disable-next-line @next/next/no-img-element -- proxy / external CDN
 								<img

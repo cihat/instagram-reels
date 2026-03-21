@@ -1,4 +1,9 @@
-export type StoredCustomCategory = { id: string; label: string }
+export type StoredCustomCategory = {
+	id: string
+	label: string
+	/** When true, category stays in storage but is omitted from the sidebar */
+	hidden?: boolean
+}
 
 const KEY = "reels-custom-categories-v1"
 
@@ -21,7 +26,11 @@ export function loadCustomCategories(): StoredCustomCategory[] {
 			) {
 				const id = (row as StoredCustomCategory).id.trim()
 				const label = (row as StoredCustomCategory).label.trim()
-				if (id && label) out.push({ id, label })
+				const hidden =
+					"hidden" in row &&
+					typeof (row as StoredCustomCategory).hidden === "boolean" &&
+					(row as StoredCustomCategory).hidden
+				if (id && label) out.push(hidden ? { id, label, hidden: true } : { id, label })
 			}
 		}
 		return out

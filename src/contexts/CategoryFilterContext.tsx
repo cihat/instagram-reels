@@ -12,7 +12,9 @@ import {
 } from "react"
 import {
 	loadCategoryAccountOverrides,
+	loadCategoryHiddenAccounts,
 	persistCategoryAccountOverrides,
+	persistCategoryHiddenAccounts,
 	persistSelectedCategory,
 	readStoredSelectedCategoryId,
 } from "@/lib/category-accounts-storage"
@@ -22,13 +24,18 @@ import {
 	type StoredCustomCategory,
 } from "@/lib/custom-categories-storage"
 import {
+	ALL_VIDEOS_INDEX_EDITOR_ID,
 	BUILTIN_REEL_CATEGORY_IDS,
 	OTHER_CATEGORY_ID,
 	REEL_CATEGORIES,
 	getDefaultAccountsForBuiltinCategory,
 	slugifyCustomReelCategoryId,
 } from "@/lib/reel-categories"
-import { normalizeForSearch } from "@/lib/search"
+import {
+	getFilterOptions,
+	isIndexLoaded,
+	normalizeForSearch,
+} from "@/lib/search"
 
 type AddCategoryResult =
 	| { ok: true; id: string }
@@ -40,21 +47,36 @@ type CategoryFilterContextValue = {
 	setSelectedCategory: (category: string | null) => void
 	accountOverrides: Record<string, string[]>
 	setAccountsForCategory: (category: string, usernames: string[]) => void
+	/** Members + hidden norms; used by category account editor */
+	setCategoryAccountsWithHidden: (
+		category: string,
+		usernames: string[],
+		hiddenNormalized: string[],
+	) => void
+	/** Full member list (visible + hidden) for a category */
+	getCategoryMemberAccounts: (category: string) => string[]
+	/** Normalized usernames hidden from the reel grid for that category */
+	getHiddenNormsForCategory: (category: string) => string[]
 	getEffectiveAccounts: (category: string) => string[]
 	bumpIndexEpoch: () => void
 	indexEpoch: number
 	customCategories: StoredCustomCategory[]
-	/** Built-in then custom, in order */
+	/** Built-in then visible custom, in order */
 	sidebarCategories: { id: string; label: string }[]
+	/** Built-in + all custom (including hidden); excludes Other — for exclusive account assignment math */
+	assignableCategoryIds: string[]
 	addCustomCategory: (displayName: string) => AddCategoryResult
-	/** Built-in categories cannot be removed */
-	removeCustomCategory: (id: string) => boolean
+	hideCustomCategory: (id: string) => boolean
+	unhideCustomCategory: (id: string) => boolean
 	isBuiltinCategory: (id: string) => boolean
 	getCategoryLabel: (id: string) => string
 	/** Local category account storage has been read */
 	categoryFilterReady: boolean
 	/** Exclusive: removes from all assignable categories, or assigns to one target (and removes from others) */
 	moveUsernameToCategory: (username: string, targetCategoryId: string) => void
+	/** Shared with Reels header / sidebar: Source accounts dialog */
+	sourcesModalOpen: boolean
+	setSourcesModalOpen: (open: boolean) => void
 }
 
 const CategoryFilterContext = createContext<CategoryFilterContextValue | null>(
@@ -68,11 +90,19 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 	const [accountOverrides, setAccountOverrides] = useState<
 		Record<string, string[]>
 	>({})
+	const [hiddenAccountNormsByCategory, setHiddenAccountNormsByCategory] =
+		useState<Record<string, string[]>>({})
 	const [customCategories, setCustomCategories] = useState<
 		StoredCustomCategory[]
 	>([])
 	const [hydrated, setHydrated] = useState(false)
 	const [indexEpoch, setIndexEpoch] = useState(0)
+	const [sourcesModalOpen, setSourcesModalOpen] = useState(false)
+
+	const accountOverridesRef = useRef(accountOverrides)
+	accountOverridesRef.current = accountOverrides
+	const hiddenNormsRef = useRef(hiddenAccountNormsByCategory)
+	hiddenNormsRef.current = hiddenAccountNormsByCategory
 
 	const customCategoriesRef = useRef<StoredCustomCategory[]>([])
 	customCategoriesRef.current = customCategories
@@ -94,6 +124,7 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 			...custom.map((c) => c.id),
 		])
 		setAccountOverrides(loadCategoryAccountOverrides(allowed))
+		setHiddenAccountNormsByCategory(loadCategoryHiddenAccounts(allowed))
 		const raw = readStoredSelectedCategoryId()
 		if (raw && allowed.has(raw)) setSelectedCategoryState(raw)
 		else {
@@ -111,11 +142,17 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 		persistSelectedCategory(next)
 	}, [allowedCategoryIdsFromRef])
 
-	const setAccountsForCategory = useCallback(
-		(category: string, usernames: string[]) => {
+	const norm = useCallback((s: string) => normalizeForSearch(s), [])
+
+	const setCategoryAccountsWithHidden = useCallback(
+		(category: string, usernames: string[], hiddenNormalized: string[]) => {
 			const allowed = allowedCategoryIdsFromRef()
 			if (category === OTHER_CATEGORY_ID) return
-			if (!allowed.has(category)) return
+			if (
+				!allowed.has(category) &&
+				category !== ALL_VIDEOS_INDEX_EDITOR_ID
+			)
+				return
 			const cleaned = [
 				...new Set(
 					usernames
@@ -123,13 +160,63 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 						.filter(Boolean),
 				),
 			].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
+			const memberNorms = new Set(cleaned.map((u) => norm(u)))
+			const hiddenClean = [
+				...new Set(
+					hiddenNormalized
+						.map((h) => norm(h))
+						.filter((h) => h && memberNorms.has(h)),
+				),
+			].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
 			setAccountOverrides((prev) => {
 				const next = { ...prev, [category]: cleaned }
 				persistCategoryAccountOverrides(next, allowed)
 				return next
 			})
+			setHiddenAccountNormsByCategory((prev) => {
+				const next = { ...prev }
+				if (hiddenClean.length === 0) delete next[category]
+				else next[category] = hiddenClean
+				persistCategoryHiddenAccounts(next, allowed)
+				return next
+			})
 		},
-		[allowedCategoryIdsFromRef],
+		[allowedCategoryIdsFromRef, norm],
+	)
+
+	const setAccountsForCategory = useCallback(
+		(category: string, usernames: string[]) => {
+			const allowed = allowedCategoryIdsFromRef()
+			if (category === OTHER_CATEGORY_ID) return
+			if (
+				!allowed.has(category) &&
+				category !== ALL_VIDEOS_INDEX_EDITOR_ID
+			)
+				return
+			const cleaned = [
+				...new Set(
+					usernames
+						.map((u) => u.trim().replace(/^@+/, ""))
+						.filter(Boolean),
+				),
+			].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
+			const memberNorms = new Set(cleaned.map((u) => norm(u)))
+			setAccountOverrides((prev) => {
+				const next = { ...prev, [category]: cleaned }
+				persistCategoryAccountOverrides(next, allowed)
+				return next
+			})
+			setHiddenAccountNormsByCategory((prev) => {
+				const prevH = prev[category] ?? []
+				const nextH = prevH.filter((h) => memberNorms.has(h))
+				const next = { ...prev }
+				if (nextH.length === 0) delete next[category]
+				else next[category] = nextH
+				persistCategoryHiddenAccounts(next, allowed)
+				return next
+			})
+		},
+		[allowedCategoryIdsFromRef, norm],
 	)
 
 	const isBuiltinCategory = useCallback(
@@ -137,25 +224,16 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 		[],
 	)
 
-	const removeCustomCategory = useCallback((id: string) => {
+	const hideCustomCategory = useCallback((id: string) => {
 		if (BUILTIN_REEL_CATEGORY_IDS.has(id)) return false
-		const prevCustom = customCategoriesRef.current
-		if (!prevCustom.some((c) => c.id === id)) return false
-		const nextCustom = prevCustom.filter((c) => c.id !== id)
-		persistCustomCategories(nextCustom)
-		setCustomCategories(nextCustom)
-
-		const allowed = new Set([
-			...BUILTIN_REEL_CATEGORY_IDS,
-			...nextCustom.map((c) => c.id),
-		])
-		setAccountOverrides((ov) => {
-			const nextOv = { ...ov }
-			delete nextOv[id]
-			persistCategoryAccountOverrides(nextOv, allowed)
-			return nextOv
-		})
-
+		const prev = customCategoriesRef.current
+		const idx = prev.findIndex((c) => c.id === id)
+		if (idx === -1) return false
+		const next = prev.map((c, i) =>
+			i === idx ? { id: c.id, label: c.label, hidden: true as const } : c,
+		)
+		persistCustomCategories(next)
+		setCustomCategories(next)
 		setSelectedCategoryState((sel) => {
 			if (sel === id) {
 				persistSelectedCategory(null)
@@ -166,15 +244,52 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 		return true
 	}, [])
 
-	const getEffectiveAccounts = useCallback(
+	const unhideCustomCategory = useCallback((id: string) => {
+		const prev = customCategoriesRef.current
+		const idx = prev.findIndex((c) => c.id === id)
+		if (idx === -1) return false
+		const cat = prev[idx]
+		if (!cat.hidden) return false
+		const next = prev.map((c, i) =>
+			i === idx ? { id: c.id, label: c.label } : c,
+		)
+		persistCustomCategories(next)
+		setCustomCategories(next)
+		return true
+	}, [])
+
+	const getCategoryMemberAccounts = useCallback(
 		(category: string) => {
 			if (category === OTHER_CATEGORY_ID) return []
+			if (category === ALL_VIDEOS_INDEX_EDITOR_ID) {
+				if (Object.hasOwn(accountOverrides, category)) {
+					return accountOverrides[category] ?? []
+				}
+				if (isIndexLoaded()) return getFilterOptions().usernames
+				return []
+			}
 			if (Object.hasOwn(accountOverrides, category)) {
 				return accountOverrides[category] ?? []
 			}
 			return getDefaultAccountsForBuiltinCategory(category)
 		},
-		[accountOverrides],
+		[accountOverrides, indexEpoch],
+	)
+
+	const getHiddenNormsForCategory = useCallback(
+		(category: string) => hiddenAccountNormsByCategory[category] ?? [],
+		[hiddenAccountNormsByCategory],
+	)
+
+	const getEffectiveAccounts = useCallback(
+		(category: string) => {
+			const members = getCategoryMemberAccounts(category)
+			if (members.length === 0) return []
+			const hidden = new Set(hiddenAccountNormsByCategory[category] ?? [])
+			if (hidden.size === 0) return members
+			return members.filter((u) => !hidden.has(norm(u)))
+		},
+		[getCategoryMemberAccounts, hiddenAccountNormsByCategory, norm],
 	)
 
 	const moveUsernameToCategory = useCallback(
@@ -193,49 +308,62 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 				...customCategoriesRef.current.map((c) => c.id),
 			]
 
-			const norm = (s: string) => normalizeForSearch(s)
-			const nu = norm(u)
+			const normLocal = (s: string) => normalizeForSearch(s)
+			const nu = normLocal(u)
 
-			setAccountOverrides((prev) => {
-				const readEff = (id: string): string[] => {
-					if (Object.hasOwn(prev, id)) return prev[id] ?? []
-					return getDefaultAccountsForBuiltinCategory(id)
+			const prev = accountOverridesRef.current
+			const readEff = (id: string): string[] => {
+				if (Object.hasOwn(prev, id)) return prev[id] ?? []
+				return getDefaultAccountsForBuiltinCategory(id)
+			}
+			const sortUnique = (arr: string[]) =>
+				[
+					...new Set(
+						arr
+							.map((x) => x.trim().replace(/^@+/, ""))
+							.filter(Boolean),
+					),
+				].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
+			const removeUser = (list: string[]) =>
+				list.filter((x) => normLocal(x) !== nu)
+			const addUser = (list: string[]) => {
+				if (list.some((x) => normLocal(x) === nu)) return sortUnique(list)
+				return sortUnique([...list, u])
+			}
+
+			const next: Record<string, string[]> = { ...prev }
+			const touched = new Set<string>()
+
+			if (targetCategoryId === OTHER_CATEGORY_ID) {
+				for (const id of assignable) {
+					next[id] = removeUser(readEff(id))
+					touched.add(id)
 				}
-				const sortUnique = (arr: string[]) =>
-					[
-						...new Set(
-							arr
-								.map((x) => x.trim().replace(/^@+/, ""))
-								.filter(Boolean),
-						),
-					].sort((a, b) =>
-						a.localeCompare(b, "en", { sensitivity: "base" }),
-					)
-				const removeUser = (list: string[]) =>
-					list.filter((x) => norm(x) !== nu)
-				const addUser = (list: string[]) => {
-					if (list.some((x) => norm(x) === nu)) return sortUnique(list)
-					return sortUnique([...list, u])
-				}
-
-				const next: Record<string, string[]> = { ...prev }
-
-				if (targetCategoryId === OTHER_CATEGORY_ID) {
-					for (const id of assignable) {
-						next[id] = removeUser(readEff(id))
-					}
-					persistCategoryAccountOverrides(next, allowed)
-					return next
-				}
-
+			} else {
 				for (const id of assignable) {
 					if (id === targetCategoryId) continue
 					next[id] = removeUser(readEff(id))
+					touched.add(id)
 				}
 				next[targetCategoryId] = addUser(readEff(targetCategoryId))
-				persistCategoryAccountOverrides(next, allowed)
-				return next
-			})
+				touched.add(targetCategoryId)
+			}
+
+			const nextHidden: Record<string, string[]> = {
+				...hiddenNormsRef.current,
+			}
+			for (const id of touched) {
+				const list = nextHidden[id]
+				if (!list?.length) continue
+				const filtered = list.filter((h) => h !== nu)
+				if (filtered.length === 0) delete nextHidden[id]
+				else nextHidden[id] = filtered
+			}
+
+			persistCategoryAccountOverrides(next, allowed)
+			persistCategoryHiddenAccounts(nextHidden, allowed)
+			setAccountOverrides(next)
+			setHiddenAccountNormsByCategory(nextHidden)
 		},
 		[allowedCategoryIdsFromRef],
 	)
@@ -244,10 +372,18 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 		setIndexEpoch((e) => e + 1)
 	}, [])
 
+	const assignableCategoryIds = useMemo(
+		() => [
+			...REEL_CATEGORIES.map((c) => c.id),
+			...customCategories.map((c) => c.id),
+		],
+		[customCategories],
+	)
+
 	const sidebarCategories = useMemo(
 		() => [
 			...REEL_CATEGORIES.map((c) => ({ id: c.id, label: c.label })),
-			...customCategories,
+			...customCategories.filter((c) => !c.hidden),
 			{ id: OTHER_CATEGORY_ID, label: "Other" },
 		],
 		[customCategories],
@@ -256,6 +392,7 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 	const getCategoryLabel = useCallback(
 		(id: string) => {
 			if (id === OTHER_CATEGORY_ID) return "Other"
+			if (id === ALL_VIDEOS_INDEX_EDITOR_ID) return "All videos"
 			const b = REEL_CATEGORIES.find((c) => c.id === id)
 			if (b) return b.label
 			return customCategories.find((c) => c.id === id)?.label ?? id
@@ -295,17 +432,24 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 			setSelectedCategory,
 			accountOverrides,
 			setAccountsForCategory,
+			setCategoryAccountsWithHidden,
+			getCategoryMemberAccounts,
+			getHiddenNormsForCategory,
 			getEffectiveAccounts,
 			bumpIndexEpoch,
 			indexEpoch,
 			customCategories,
 			sidebarCategories,
+			assignableCategoryIds,
 			addCustomCategory,
-			removeCustomCategory,
+			hideCustomCategory,
+			unhideCustomCategory,
 			isBuiltinCategory,
 			getCategoryLabel,
 			categoryFilterReady: hydrated,
 			moveUsernameToCategory,
+			sourcesModalOpen,
+			setSourcesModalOpen,
 		}),
 		[
 			hydrated,
@@ -313,16 +457,22 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 			setSelectedCategory,
 			accountOverrides,
 			setAccountsForCategory,
+			setCategoryAccountsWithHidden,
+			getCategoryMemberAccounts,
+			getHiddenNormsForCategory,
 			getEffectiveAccounts,
 			bumpIndexEpoch,
 			indexEpoch,
 			customCategories,
 			sidebarCategories,
+			assignableCategoryIds,
 			addCustomCategory,
-			removeCustomCategory,
+			hideCustomCategory,
+			unhideCustomCategory,
 			isBuiltinCategory,
 			getCategoryLabel,
 			moveUsernameToCategory,
+			sourcesModalOpen,
 		],
 	)
 

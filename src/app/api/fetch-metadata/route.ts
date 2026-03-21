@@ -1,7 +1,14 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 import { instagramCookieHeaderFromUserInput } from "@/lib/instagram-cookie-input"
 import { fetchReelsForUser } from "@/lib/instagram-reels"
+import { dedupeMediaItemsByReel } from "@/lib/reel-dedupe"
 import type { MediaItem } from "@/lib/types"
+import {
+	clientIpFromRequest,
+	consumeKvRateLimit,
+	FETCH_METADATA_LIMIT,
+	FETCH_METADATA_WINDOW_SEC,
+} from "@/lib/r2-rate-limit"
 import { NextResponse } from "next/server"
 
 function getEnv(name: string): string | undefined {
@@ -23,23 +30,40 @@ function normalizeAccounts(raw: unknown): string[] {
 	return out
 }
 
-function mergeByShortcode(existing: MediaItem[], incoming: MediaItem[]): MediaItem[] {
-	const map = new Map<string, MediaItem>()
-	for (const i of existing) {
-		map.set(i.shortcode || i.id, i)
-	}
-	for (const i of incoming) {
-		map.set(i.shortcode || i.id, i)
-	}
-	return [...map.values()]
-}
-
 const MAX_ACCOUNTS_PER_REQUEST = 8
 
 /**
  * Fetches Instagram directly; merges with R2 `index.json` when the binding exists.
  */
 export async function POST(request: Request) {
+	let kv: KVNamespace | undefined
+	let bucket: R2Bucket | undefined
+	try {
+		const { env } = await getCloudflareContext({ async: true })
+		kv = env.RATE_LIMIT_KV
+		bucket = env.REELS_BUCKET
+	} catch {
+		kv = undefined
+		bucket = undefined
+	}
+
+	const rl = await consumeKvRateLimit(
+		kv,
+		"fetch-metadata",
+		clientIpFromRequest(request),
+		FETCH_METADATA_LIMIT,
+		FETCH_METADATA_WINDOW_SEC,
+	)
+	if (!rl.ok) {
+		return NextResponse.json(
+			{ error: "Too many metadata refresh requests. Try again later." },
+			{
+				status: 429,
+				headers: { "Retry-After": String(rl.retryAfterSec) },
+			},
+		)
+	}
+
 	let body: { secret?: string; accounts?: unknown }
 	try {
 		body = (await request.json()) as { secret?: string; accounts?: unknown }
@@ -90,18 +114,15 @@ export async function POST(request: Request) {
 		)
 	}
 
-	let bucket: R2Bucket | undefined
-	try {
-		const { env } = await getCloudflareContext({ async: true })
-		bucket = env.REELS_BUCKET
-	} catch {
-		bucket = undefined
-	}
-
 	const allWarnings: string[] = []
 	const fetched: MediaItem[] = []
 
-	for (const u of accounts) {
+	for (let i = 0; i < accounts.length; i++) {
+		const u = accounts[i]
+		if (i > 0) {
+			// Space out calls to reduce Instagram rate limits (401 "wait a few minutes").
+			await new Promise((r) => setTimeout(r, 2500))
+		}
 		const { items, warnings } = await fetchReelsForUser(u, cookie)
 		allWarnings.push(...warnings)
 		fetched.push(...items)
@@ -122,7 +143,7 @@ export async function POST(request: Request) {
 		}
 	}
 
-	const merged = mergeByShortcode(existing, fetched)
+	const merged = dedupeMediaItemsByReel([...existing, ...fetched])
 
 	let persisted = false
 	if (bucket) {

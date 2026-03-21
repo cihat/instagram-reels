@@ -1,47 +1,79 @@
-# OpenNext Starter
+<div align="center">
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+![Reels Search logosu](public/logo.svg)
 
-## Getting Started
+# Reels Search
 
-Read the documentation at https://opennext.js.org/cloudflare.
+**Seçtiğin Instagram hesaplarından Reels topla, ara ve düzenli şekilde izle.**
 
-## Develop
+[Uygulamayı çalıştır](#geliştir) · [Cloudflare’e dağıt](#dağıtım)
 
-Run the Next.js development server:
+</div>
+
+---
+
+## Ne işe yarıyor?
+
+Reels Search, Instagram Reels içeriklerini **kendi belirlediğin kaynak listesi** üzerinden görüntülemen ve **başlık, etiket ve filtrelerle arama** yapman için bir web uygulamasıdır. Akışı tek tek hesaplarda gezmek yerine; kategoriler, hesap grupları ve arama ile odaklanmış bir izleme deneyimi sunar.
+
+## Neden var?
+
+Instagram’ın kendi arayüzü çok hesap ve çok içerik için pratik olmayabiliyor. Bu proje; **belirli nişleri, içerik üreticilerini veya temaları** bir arada tutup, metin araması ve sıralama ile hızlıca bulmayı hedefler. Kendi sunucunda veya Cloudflare üzerinde çalıştırılabilir; veri ve kullanım tercihleri sana kalır.
+
+## Nasıl çalışır? (kısaca)
+
+- **Kaynaklar:** İzlemek istediğin hesapları eklersin; uygulama bu kaynaklardan gelen Reels verisini işler.
+- **Keşif / arama:** Başlık ve etiketlere göre arama, sıralama ve sanal liste ile performanslı kaydırma.
+- **Dağıtım:** [Next.js](https://nextjs.org) ve [OpenNext Cloudflare](https://opennext.js.org/cloudflare) ile edge’e yakın çalışan bir yapı; PWA desteği ile ana ekrana eklenebilir.
+
+Teknik ayrıntılar ve ortam değişkenleri için repodaki `.dev.vars.example` dosyasına bak.
+
+## Marka ve uygulama ikonu
+
+Merkezde vektör tabanlı logo dosyaları kullanılıyor:
+
+| Dosya | Amaç |
+|--------|------|
+| [`public/logo.svg`](public/logo.svg) | Ana logo (vektör, landing vb.) |
+| [`public/favicon.svg`](public/favicon.svg) | Sekme ikonu (hafif, SVG) |
+| [`public/logo.png`](public/logo.png) | 512×512 PNG (`any` PWA, yedek ikon) |
+| [`public/logo-maskable.png`](public/logo-maskable.png) | Android maskable güvenli alan |
+| [`public/apple-touch-icon.png`](public/apple-touch-icon.png) | Apple “Ana Ekrana Ekle” |
+
+Logoyu değiştirdikten sonra PNG’leri yeniden üretmek için (macOS + Homebrew [librsvg](https://wiki.gnome.org/Projects/LibRsvg)):
+
+```bash
+rsvg-convert -w 512 -h 512 public/logo.svg -o public/logo.png
+rsvg-convert -w 512 -h 512 public/logo-maskable.svg -o public/logo-maskable.png
+rsvg-convert -w 180 -h 180 public/logo.svg -o public/apple-touch-icon.png
+```
+
+## Geliştir
+
+Yerelde Next.js geliştirme sunucusu:
 
 ```bash
 npm run dev
-# or similar package manager command
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Tarayıcıda [http://localhost:3000](http://localhost:3000) adresini aç.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-## Preview
-
-Preview the application locally on the Cloudflare runtime:
+## Önizleme (Cloudflare çalışma zamanı)
 
 ```bash
 npm run preview
-# or similar package manager command
 ```
 
-## Deploy
+## Dağıtım
 
-Deploy the application to Cloudflare:
+Cloudflare’e dağıtım:
 
 ```bash
 npm run deploy
-# or similar package manager command
 ```
 
-## Learn More
+Ek bilgi: [OpenNext Cloudflare dokümantasyonu](https://opennext.js.org/cloudflare).
 
-To learn more about Next.js, take a look at the following resources:
+## Lisans ve katkı
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Bu depo [Next.js](https://nextjs.org/docs) ekosistemini kullanır. Geri bildirim ve katkılar için GitHub üzerinden issue veya PR açabilirsin.

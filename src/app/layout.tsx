@@ -24,8 +24,11 @@ export const metadata: Metadata = {
 		"Search and browse Instagram Reels from accounts you choose — by caption, tags, and filters.",
 	referrer: "no-referrer",
 	icons: {
-		icon: "/logo.png",
-		apple: "/logo.png",
+		icon: [
+			{ url: "/favicon.svg", type: "image/svg+xml" },
+			{ url: "/logo.png", sizes: "512x512", type: "image/png" },
+		],
+		apple: "/apple-touch-icon.png",
 	},
 	appleWebApp: {
 		capable: true,

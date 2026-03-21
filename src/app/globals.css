@@ -119,6 +119,15 @@
 	--sidebar-ring: oklch(0.556 0 0);
 }
 
+@keyframes skeleton-shimmer {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(100%);
+	}
+}
+
 body {
 	background-color: var(--background);
 }

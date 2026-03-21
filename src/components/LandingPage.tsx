@@ -1,6 +1,5 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { ArrowRight, Layers, Radio, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -20,12 +19,12 @@ export function LandingPage() {
 						href="/"
 						className="flex items-center gap-2 font-semibold tracking-tight"
 					>
-						<Image
-							src="/logo.png"
+						<img
+							src="/logo.svg"
 							alt=""
 							width={28}
 							height={28}
-							className="rounded-md"
+							className="size-7 rounded-md"
 						/>
 						<span>Reels Search</span>
 					</Link>

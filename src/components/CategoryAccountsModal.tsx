@@ -9,7 +9,7 @@ import {
 	type KeyboardEvent,
 } from "react"
 import { useRouter } from "next/navigation"
-import { Plus, Trash2 } from "lucide-react"
+import { Eye, EyeOff, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
 	Dialog,
@@ -20,13 +20,39 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { enqueueMetadataFetchToast } from "@/lib/metadata-fetch-toast"
+import { normalizeForSearch } from "@/lib/search"
+import { cn } from "@/lib/utils"
 
 const PERSIST_DEBOUNCE_MS = 350
 
-function usernamesFromRows(rows: string[]): string[] {
+type Row = { value: string; hidden: boolean }
+
+function usernamesFromRows(rows: Row[]): string[] {
 	return [
 		...new Set(
-			rows.map((s) => s.trim().replace(/^@+/, "")).filter(Boolean),
+			rows.map((r) => r.value.trim().replace(/^@+/, "")).filter(Boolean),
+		),
+	].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
+}
+
+function hiddenNormsFromRows(rows: Row[]): string[] {
+	return [
+		...new Set(
+			rows
+				.filter((r) => r.value.trim() && r.hidden)
+				.map((r) => normalizeForSearch(r.value))
+				.filter(Boolean),
+		),
+	].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
+}
+
+function visibleUsernamesFromRows(rows: Row[]): string[] {
+	return [
+		...new Set(
+			rows
+				.filter((r) => r.value.trim() && !r.hidden)
+				.map((r) => r.value.trim().replace(/^@+/, ""))
+				.filter(Boolean),
 		),
 	].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
 }
@@ -40,13 +66,18 @@ type CategoryAccountsModalProps = {
 	onOpenChange: (open: boolean) => void
 	categoryId: string | null
 	categoryLabel?: string
-	accounts: string[]
-	/** Called on debounced list changes and when the dialog closes */
-	onPersistAccounts: (usernames: string[]) => void
+	/** All accounts in the category (visible + hidden from feed) */
+	memberAccounts: string[]
+	hiddenNormalized: string[]
+	/** Called on debounced changes and when the dialog closes */
+	onPersistAccounts: (
+		usernames: string[],
+		hiddenNormalized: string[],
+	) => void
 	onAfterMetadataSynced?: () => void
 	/** Shown for custom categories */
-	showDeleteCategory?: boolean
-	onDeleteCategory?: () => void
+	showHideCategory?: boolean
+	onHideCategory?: () => void
 }
 
 export function CategoryAccountsModal({
@@ -54,14 +85,15 @@ export function CategoryAccountsModal({
 	onOpenChange,
 	categoryId: category,
 	categoryLabel,
-	accounts,
+	memberAccounts,
+	hiddenNormalized,
 	onPersistAccounts,
 	onAfterMetadataSynced,
-	showDeleteCategory,
-	onDeleteCategory,
+	showHideCategory,
+	onHideCategory,
 }: CategoryAccountsModalProps) {
 	const router = useRouter()
-	const [rows, setRows] = useState<string[]>([])
+	const [rows, setRows] = useState<Row[]>([])
 	const inputRefs = useRef<(HTMLInputElement | null)[]>([])
 	const pendingFocusRow = useRef<number | null>(null)
 	const rowsRef = useRef(rows)
@@ -70,7 +102,7 @@ export function CategoryAccountsModal({
 	categoryRef.current = category
 	const persistRef = useRef(onPersistAccounts)
 	persistRef.current = onPersistAccounts
-	const initialSnapshotRef = useRef("")
+	const initialVisibleSnapshotRef = useRef("")
 	const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const suppressCloseFlushRef = useRef(false)
 
@@ -93,11 +125,21 @@ export function CategoryAccountsModal({
 
 	useEffect(() => {
 		if (open && category) {
-			const initial = accounts.length > 0 ? [...accounts] : [""]
+			const hiddenSet = new Set(hiddenNormalized)
+			const initial: Row[] =
+				memberAccounts.length > 0
+					? memberAccounts.map((u) => ({
+							value: u,
+							hidden: hiddenSet.has(normalizeForSearch(u)),
+						}))
+					: [{ value: "", hidden: false }]
 			setRows(initial)
-			initialSnapshotRef.current = snapshotSorted(accounts)
+			const initiallyVisible = memberAccounts.filter(
+				(u) => !hiddenSet.has(normalizeForSearch(u)),
+			)
+			initialVisibleSnapshotRef.current = snapshotSorted(initiallyVisible)
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- open/category
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- open/category reset
 	}, [open, category])
 
 	useLayoutEffect(() => {
@@ -112,7 +154,10 @@ export function CategoryAccountsModal({
 		if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
 		persistTimerRef.current = setTimeout(() => {
 			persistTimerRef.current = null
-			persistRef.current(usernamesFromRows(rowsRef.current))
+			persistRef.current(
+				usernamesFromRows(rowsRef.current),
+				hiddenNormsFromRows(rowsRef.current),
+			)
 		}, PERSIST_DEBOUNCE_MS)
 		return () => {
 			if (persistTimerRef.current) {
@@ -130,11 +175,13 @@ export function CategoryAccountsModal({
 			persistTimerRef.current = null
 		}
 		const list = usernamesFromRows(rowsRef.current)
-		persistRef.current(list)
-		const nowSnap = snapshotSorted(list)
-		if (list.length > 0 && nowSnap !== initialSnapshotRef.current) {
-			runMetadataFetch(list)
-			initialSnapshotRef.current = nowSnap
+		const hiddenNorms = hiddenNormsFromRows(rowsRef.current)
+		persistRef.current(list, hiddenNorms)
+		const visible = visibleUsernamesFromRows(rowsRef.current)
+		const nowSnap = snapshotSorted(visible)
+		if (visible.length > 0 && nowSnap !== initialVisibleSnapshotRef.current) {
+			runMetadataFetch(visible)
+			initialVisibleSnapshotRef.current = nowSnap
 		}
 	}, [runMetadataFetch])
 
@@ -149,14 +196,14 @@ export function CategoryAccountsModal({
 		[flushPersistAndMaybeFetch, onOpenChange],
 	)
 
-	const handleDeleteCategory = useCallback(() => {
+	const handleHideCategory = useCallback(() => {
 		if (persistTimerRef.current) {
 			clearTimeout(persistTimerRef.current)
 			persistTimerRef.current = null
 		}
 		suppressCloseFlushRef.current = true
-		onDeleteCategory?.()
-	}, [onDeleteCategory])
+		onHideCategory?.()
+	}, [onHideCategory])
 
 	if (!category) return null
 
@@ -165,19 +212,24 @@ export function CategoryAccountsModal({
 	const addRow = () => {
 		const newIndex = rows.length
 		pendingFocusRow.current = newIndex
-		setRows((r) => [...r, ""])
+		setRows((r) => [...r, { value: "", hidden: false }])
 	}
 
 	const updateRow = (i: number, value: string) => {
 		setRows((r) => {
 			const next = [...r]
-			next[i] = value
+			next[i] = { ...next[i], value }
 			return next
 		})
 	}
 
-	const removeRow = (i: number) => {
-		setRows((r) => (r.length <= 1 ? [""] : r.filter((_, j) => j !== i)))
+	const toggleRowHidden = (i: number) => {
+		setRows((r) => {
+			const next = [...r]
+			if (!next[i]?.value.trim()) return r
+			next[i] = { ...next[i], hidden: !next[i].hidden }
+			return next
+		})
 	}
 
 	const handleRowKeyDown = (i: number, e: KeyboardEvent<HTMLInputElement>) => {
@@ -188,23 +240,22 @@ export function CategoryAccountsModal({
 		pendingFocusRow.current = i + 1
 		setRows((r) => {
 			const next = [...r]
-			next[i] = raw
-			next.splice(i + 1, 0, "")
+			next[i] = { ...next[i], value: raw }
+			next.splice(i + 1, 0, { value: "", hidden: false })
 			return next
 		})
 	}
 
 	return (
 		<Dialog open={open} onOpenChange={handleOpenChange}>
-			<DialogContent
-				className="sm:max-w-md"
-				showCloseButton
-			>
+			<DialogContent className="sm:max-w-md" showCloseButton>
 				<DialogHeader>
 					<DialogTitle>Edit accounts</DialogTitle>
 					<DialogDescription>
-						Usernames for “{label}” (without @). Changes save automatically; if the
-						list changed, a metadata fetch starts when you close this dialog.
+						Usernames for “{label}” (without @). Use the eye control to hide an
+						account from this category’s feed without removing it. Changes save
+						automatically; if visible accounts changed, a metadata fetch runs when
+						you close this dialog.
 					</DialogDescription>
 				</DialogHeader>
 				<div className="max-h-[min(50vh,20rem)] space-y-2 overflow-y-auto pr-1">
@@ -212,24 +263,32 @@ export function CategoryAccountsModal({
 						<div key={i} className="flex gap-2">
 							<Button
 								type="button"
-								variant="destructive"
+								variant="outline"
 								size="icon"
 								className="shrink-0"
-								onClick={() => removeRow(i)}
-								title="Remove row"
-								aria-label="Remove row"
+								disabled={!row.value.trim()}
+								onClick={() => toggleRowHidden(i)}
+								title={row.hidden ? "Show in feed" : "Hide from feed"}
+								aria-label={row.hidden ? "Show in feed" : "Hide from feed"}
 							>
-								<Trash2 className="size-3.5" aria-hidden />
+								{row.hidden ? (
+									<Eye className="size-3.5" aria-hidden />
+								) : (
+									<EyeOff className="size-3.5" aria-hidden />
+								)}
 							</Button>
 							<Input
 								ref={(el) => {
 									inputRefs.current[i] = el
 								}}
-								value={row}
+								value={row.value}
 								onChange={(e) => updateRow(i, e.target.value)}
 								onKeyDown={(e) => handleRowKeyDown(i, e)}
 								placeholder="username"
-								className="min-w-0 flex-1 font-mono text-sm"
+								className={cn(
+									"min-w-0 flex-1 font-mono text-sm",
+									row.hidden && row.value.trim() && "opacity-60",
+								)}
 								autoComplete="off"
 							/>
 						</div>
@@ -245,19 +304,21 @@ export function CategoryAccountsModal({
 					<Plus className="mr-1 size-4" />
 					Add account
 				</Button>
-				{showDeleteCategory && onDeleteCategory ? (
+				{showHideCategory && onHideCategory ? (
 					<div className="border-t border-border/80 pt-3">
 						<Button
 							type="button"
-							variant="destructive"
+							variant="outline"
 							size="sm"
 							className="w-full"
-							onClick={handleDeleteCategory}
+							onClick={handleHideCategory}
 						>
-							Delete category
+							<EyeOff className="mr-2 size-4" aria-hidden />
+							Hide category
 						</Button>
 						<p className="mt-1.5 text-center text-xs text-muted-foreground">
-							Only this custom category and its account list will be removed.
+							Removes it from the sidebar; accounts stay saved. Use Show in the
+							sidebar to bring it back.
 						</p>
 					</div>
 				) : null}

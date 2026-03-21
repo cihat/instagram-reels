@@ -6,6 +6,9 @@ const UA =
 /** Instagram web istemcisi (profil / JSON API) */
 const IG_APP_ID = "936619743392459"
 
+/** Each /reel/{code}/ HTML fetch costs subrequests; keep bounded for Workers + many accounts. */
+const MAX_INDIVIDUAL_REEL_HTML_FETCHES = 12
+
 function csrftokenFromCookie(cookie: string): string | undefined {
 	const m = cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/i)
 	return m?.[1]?.trim()
@@ -392,6 +395,44 @@ function shortcodesFromHtml(html: string, limit: number): string[] {
 
 type HtmlFetchMode = "cold" | "sameSite"
 
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+
+/**
+ * `redirect: "follow"` can burn one subrequest per hop on Workers; Instagram login loops
+ * hit the invocation limit quickly. Follow manually with a cap and loop detection.
+ */
+async function fetchWithBoundedRedirects(
+	url: string,
+	init: RequestInit,
+	maxRedirects = 12,
+): Promise<Response> {
+	let current = url
+	const seen = new Set<string>()
+	const chain: string[] = []
+
+	for (let hop = 0; hop <= maxRedirects; hop++) {
+		if (seen.has(current)) {
+			throw new Error(
+				`Redirect loop: ${chain.slice(-8).join(", ")}, ${current}`,
+			)
+		}
+		seen.add(current)
+		chain.push(current)
+
+		const res = await fetch(current, { ...init, redirect: "manual" })
+		if (REDIRECT_STATUSES.has(res.status)) {
+			const loc = res.headers.get("Location")
+			if (!loc) {
+				throw new Error(`HTTP ${res.status} redirect without Location`)
+			}
+			current = new URL(loc, current).href
+			continue
+		}
+		return res
+	}
+	throw new Error(`Too many redirects (${maxRedirects}): ${chain.join(", ")}`)
+}
+
 /**
  * HTML page = browser-like navigation; avoid X-Requested-With / extra CSRF (Instagram may cut the connection).
  */
@@ -419,8 +460,7 @@ async function fetchHtml(
 		"sec-ch-ua-platform": '"macOS"',
 	}
 
-	const res = await fetch(url, {
-		redirect: "follow",
+	const res = await fetchWithBoundedRedirects(url, {
 		cache: "no-store",
 		headers,
 	})
@@ -432,8 +472,7 @@ async function fetchHtml(
 
 /** UA + Cookie only — sometimes hits fewer blocks */
 async function fetchHtmlMinimal(url: string, cookie: string): Promise<string> {
-	const res = await fetch(url, {
-		redirect: "follow",
+	const res = await fetchWithBoundedRedirects(url, {
 		cache: "no-store",
 		headers: {
 			"User-Agent": UA,
@@ -587,7 +626,11 @@ export async function fetchReelsForUser(
 	}
 
 	if (items.length < cap) {
-		const codes = shortcodesFromHtml(html, cap)
+		const shortcodeBudget = Math.min(
+			cap - items.length,
+			MAX_INDIVIDUAL_REEL_HTML_FETCHES,
+		)
+		const codes = shortcodesFromHtml(html, Math.max(0, shortcodeBudget))
 		for (const code of codes) {
 			if (seenShort.has(code)) continue
 			try {

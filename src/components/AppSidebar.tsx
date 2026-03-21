@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation"
 import {
 	Activity,
 	ArrowRightLeft,
-	AtSign,
 	AudioLines,
 	Baby,
 	Bike,
@@ -21,6 +20,7 @@ import {
 	Coffee,
 	Cpu,
 	Crosshair,
+	Eye,
 	Cuboid,
 	Dumbbell,
 	Flame,
@@ -49,6 +49,7 @@ import {
 	Plane,
 	Plus,
 	Podcast,
+	Settings,
 	Shirt,
 	Shield,
 	ShoppingBag,
@@ -157,12 +158,16 @@ export function AppSidebar() {
 	const {
 		selectedCategory,
 		setSelectedCategory,
-		getEffectiveAccounts,
-		setAccountsForCategory,
-		removeCustomCategory,
+		getCategoryMemberAccounts,
+		getHiddenNormsForCategory,
+		setCategoryAccountsWithHidden,
+		hideCustomCategory,
+		unhideCustomCategory,
+		customCategories,
 		isBuiltinCategory,
 		bumpIndexEpoch,
 		sidebarCategories,
+		setSourcesModalOpen,
 		addCustomCategory,
 		getCategoryLabel,
 	} = useCategoryFilter()
@@ -316,6 +321,29 @@ export function AppSidebar() {
 									</Button>
 								</div>
 							</div>
+
+							{customCategories.some((c) => c.hidden) ? (
+								<div className="mt-2 space-y-1 border-t border-sidebar-border px-2 pt-2 group-data-[collapsible=icon]:hidden">
+									<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+										Hidden
+									</p>
+									{customCategories
+										.filter((c) => c.hidden)
+										.map((c) => (
+											<Button
+												key={c.id}
+												type="button"
+												variant="ghost"
+												size="sm"
+												className="h-8 w-full justify-start gap-2 px-2 text-xs text-muted-foreground hover:text-foreground"
+												onClick={() => unhideCustomCategory(c.id)}
+											>
+												<Eye className="size-3.5 shrink-0" aria-hidden />
+												<span className="truncate">Show “{c.label}”</span>
+											</Button>
+										))}
+								</div>
+							) : null}
 						</SidebarGroupContent>
 					</SidebarGroup>
 				</div>
@@ -326,9 +354,18 @@ export function AppSidebar() {
 						<SidebarMenuButton
 							isActive={pathname === SOURCES_PATH}
 							tooltip="Source accounts"
-							render={<Link href={SOURCES_PATH} />}
+							render={
+								pathname === REELS_PATH ? (
+									<button
+										type="button"
+										onClick={() => setSourcesModalOpen(true)}
+									/>
+								) : (
+									<Link href={SOURCES_PATH} />
+								)
+							}
 						>
-							<AtSign />
+							<Settings />
 							<span>Sources</span>
 						</SidebarMenuButton>
 					</SidebarMenuItem>
@@ -352,23 +389,32 @@ export function AppSidebar() {
 						? getCategoryLabel(editingCategoryId)
 						: undefined
 				}
-				accounts={
+				memberAccounts={
 					editingCategoryId
-						? getEffectiveAccounts(editingCategoryId)
+						? getCategoryMemberAccounts(editingCategoryId)
 						: []
 				}
-				onPersistAccounts={(usernames) => {
+				hiddenNormalized={
+					editingCategoryId
+						? getHiddenNormsForCategory(editingCategoryId)
+						: []
+				}
+				onPersistAccounts={(usernames, hiddenNorms) => {
 					if (editingCategoryId)
-						setAccountsForCategory(editingCategoryId, usernames)
+						setCategoryAccountsWithHidden(
+							editingCategoryId,
+							usernames,
+							hiddenNorms,
+						)
 				}}
 				onAfterMetadataSynced={bumpIndexEpoch}
-				showDeleteCategory={
+				showHideCategory={
 					editingCategoryId != null &&
 					!isBuiltinCategory(editingCategoryId)
 				}
-				onDeleteCategory={() => {
+				onHideCategory={() => {
 					if (!editingCategoryId) return
-					removeCustomCategory(editingCategoryId)
+					hideCustomCategory(editingCategoryId)
 					setEditOpen(false)
 					setEditingCategoryId(null)
 				}}

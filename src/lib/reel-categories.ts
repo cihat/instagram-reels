@@ -59,6 +59,12 @@ export const REEL_CATEGORIES = [
 /** Synthetic bucket: index accounts not assigned to any real category (not in onboarding list) */
 export const OTHER_CATEGORY_ID = "other" as const
 
+/**
+ * Client-only pseudo-id for the Reels header editor on “All videos”: lists usernames from the
+ * loaded index (not stored as a category override).
+ */
+export const ALL_VIDEOS_INDEX_EDITOR_ID = "__all_videos_index__" as const
+
 /** Curated public handles used as category defaults and onboarding seeds */
 export const DEFAULT_BUILTIN_CATEGORY_ACCOUNTS: Record<
 	ReelCategoryId,

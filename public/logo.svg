@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none" role="img" aria-label="Reels Search">
+	<defs>
+		<linearGradient id="rs-surface" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+			<stop stop-color="#312e81" />
+			<stop offset="0.45" stop-color="#7c3aed" />
+			<stop offset="1" stop-color="#e11d48" />
+		</linearGradient>
+		<linearGradient id="rs-strip" x1="80" y1="88" x2="80" y2="188" gradientUnits="userSpaceOnUse">
+			<stop stop-color="#ffffff" stop-opacity="0.28" />
+			<stop offset="1" stop-color="#ffffff" stop-opacity="0.07" />
+		</linearGradient>
+		<filter id="rs-glow" x="-8%" y="-8%" width="116%" height="116%">
+			<feGaussianBlur stdDeviation="2" result="b" />
+			<feMerge>
+				<feMergeNode in="b" />
+				<feMergeNode in="SourceGraphic" />
+			</feMerge>
+		</filter>
+	</defs>
+	<!-- Squircle -->
+	<rect width="512" height="512" rx="118" fill="url(#rs-surface)" />
+	<rect x="20" y="20" width="472" height="472" rx="102" stroke="#ffffff" stroke-opacity="0.14" stroke-width="3" />
+	<!-- Clapper strip -->
+	<rect x="72" y="72" width="368" height="124" rx="28" fill="url(#rs-strip)" />
+	<path
+		stroke="#ffffff"
+		stroke-opacity="0.42"
+		stroke-width="10"
+		stroke-linecap="round"
+		d="M104 168h304"
+	/>
+	<path
+		stroke="#ffffff"
+		stroke-opacity="0.5"
+		stroke-width="12"
+		stroke-linecap="round"
+		d="M112 148l72-52M184 156l88-60M268 158l96-62"
+	/>
+	<!-- Play -->
+	<path
+		fill="#ffffff"
+		fill-opacity="0.94"
+		filter="url(#rs-glow)"
+		d="M234 226c0-8 9-13 17-9l148 86c8 5 8 17 0 22l-148 86c-8 5-17 0-17-9V226z"
+	/>
+</svg>

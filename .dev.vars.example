@@ -4,5 +4,9 @@ NEXTJS_ENV=development
 # POST /api/fetch-metadata — üretimde zorunlu önerilir
 # FETCH_TRIGGER_SECRET=uzun-rastgele-dize
 
-# Instagram web isteği için tarayıcıdan kopyalanan Cookie satırı (sessionid=…; csrftoken=…; …)
+# Instagram web isteği + /api/image-proxy (thumbnail’ler) için tarayıcıdan kopyalanan Cookie satırı (sessionid=…; csrftoken=…; …)
 # INSTAGRAM_COOKIES=
+
+# Üretim (Workers): çerezi repoya yazma — bir kez şunu çalıştır, değeri yapıştır:
+#   npx wrangler secret put INSTAGRAM_COOKIES
+# Aksi halde `wrangler deploy` Dashboard’daki INSTAGRAM_COOKIES değişkenini silebilir.

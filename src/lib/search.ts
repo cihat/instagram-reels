@@ -136,8 +136,8 @@ export function search(params: SearchParams): MediaItem[] {
 		)
 	}
 
-	const limit = params.limit ?? 80
-	return filtered.slice(0, limit)
+	if (params.limit === undefined) return filtered
+	return filtered.slice(0, params.limit)
 }
 
 export function getFilterOptions(): {

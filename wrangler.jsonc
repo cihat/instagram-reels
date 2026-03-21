@@ -8,6 +8,14 @@
 	"main": ".open-next/worker.js",
 	"compatibility_date": "2026-03-17",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	// Keep in sync with Workers → instagram-reels → Settings so deploy does not drop the custom domain.
+	"routes": [
+		{
+			"pattern": "reels.cihat.dev",
+			"zone_name": "cihat.dev",
+			"custom_domain": true
+		}
+	],
 	"assets": {
 		"binding": "ASSETS",
 		"directory": ".open-next/assets"
@@ -21,10 +29,24 @@
 			"service": "instagram-reels"
 		}
 	],
-	// Cloudflare Dashboard → R2: create a bucket, then set `bucket_name` below to match (default: reels-search-data).
+	// R2: Dashboard → R2 → Get started (enable product). API error 10042 = R2 not enabled on this account yet.
+	// Then create bucket `reels-search-data` (or change bucket_name) and redeploy.
 	"r2_buckets": [
 		{ "binding": "REELS_BUCKET", "bucket_name": "reels-search-data" }
 	],
+	// Abuse koruması: R2 okuma/yazma ve ağır metadata istekleri için IP başına sınır (KV).
+	"kv_namespaces": [
+		{
+			"binding": "RATE_LIMIT_KV",
+			"id": "91ed72ac469448e88cfca8706e403efb",
+			"preview_id": "ee784044fb7b4e429dc4280ba4178578"
+		}
+	],
+	// Instagram HTML follows many redirects when blocked; each hop counts as a subrequest.
+	// Default (50) is easy to exceed when fetching several accounts + /reel/ pages.
+	"limits": {
+		"subrequests": 2000
+	},
 	"observability": {
 		"enabled": true
 	}

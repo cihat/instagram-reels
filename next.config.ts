@@ -1,5 +1,5 @@
 import type { NextConfig } from "next"
-import withPWAInit from "@ducanh2912/next-pwa"
+import withPWAInit, { runtimeCaching as pwaRuntimeCaching } from "@ducanh2912/next-pwa"
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare"
 
 const withPWA = withPWAInit({
@@ -7,6 +7,24 @@ const withPWA = withPWAInit({
 	disable: process.env.NODE_ENV === "development",
 	register: true,
 	scope: "/",
+	// Bypass stale /api cache for Instagram thumbnails (must match before generic /api/ rule).
+	workboxOptions: {
+		runtimeCaching: [
+			{
+				urlPattern: ({
+					url,
+					request,
+				}: {
+					url: URL
+					request: Request
+				}) =>
+					request.method === "GET" &&
+					url.pathname.startsWith("/api/image-proxy"),
+				handler: "NetworkOnly",
+			},
+			...pwaRuntimeCaching,
+		],
+	},
 })
 
 const nextConfig: NextConfig = {

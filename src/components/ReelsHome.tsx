@@ -13,8 +13,10 @@ import {
 	useState,
 } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowUpDown, Plus, Search } from "lucide-react"
+import { ArrowUpDown, Search, Settings } from "lucide-react"
 import { AccountFilterBar } from "@/components/AccountFilterBar"
+import { AccountOrganizeModal } from "@/components/AccountOrganizeModal"
+import { CategoryAccountsModal } from "@/components/CategoryAccountsModal"
 import { MediaCard } from "@/components/MediaCard"
 import { useCategoryFilter } from "@/contexts/CategoryFilterContext"
 import { PlayingVideoProvider } from "@/contexts/PlayingVideoContext"
@@ -27,7 +29,10 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { computeUnassignedUsernames } from "@/lib/category-account-assignment"
 import { enqueueMetadataFetchToast } from "@/lib/metadata-fetch-toast"
-import { OTHER_CATEGORY_ID } from "@/lib/reel-categories"
+import {
+	ALL_VIDEOS_INDEX_EDITOR_ID,
+	OTHER_CATEGORY_ID,
+} from "@/lib/reel-categories"
 import {
 	getFilterOptions,
 	isIndexLoaded,
@@ -40,6 +45,10 @@ import type { MediaItem, SortOption } from "@/lib/types"
 
 const SEARCH_DEBOUNCE_MS = 450
 const SORT_STORAGE_KEY = "reels-search-sort"
+/** First paint batch; more rows load while scrolling */
+const REELS_PAGE_INITIAL = 72
+const REELS_PAGE_SIZE = 48
+const REELS_SCROLL_LOAD_THRESHOLD_PX = 720
 
 /** Matches Tailwind `columns-*` breakpoints used before virtualization */
 const REEL_LANE_MEDIA_QUERIES = [
@@ -53,6 +62,8 @@ const REEL_LANE_MEDIA_QUERIES = [
 const REEL_MASONRY_GAP_PX = 8
 /** Bottom space above fixed search UI (`pb-24`) */
 const REEL_LIST_PADDING_END_PX = 96
+/** Below this count, render a normal CSS-columns grid; virtualize only for large lists. */
+const REELS_VIRTUAL_MIN_ITEMS = 128
 
 function useReelLaneCount(): number {
 	const [lanes, setLanes] = useState(2)
@@ -97,7 +108,8 @@ function estimateReelTileForColumn(
 	if (!item) return 400
 	const w = item.width && item.width > 0 ? item.width : 9
 	const h = item.height && item.height > 0 ? item.height : 16
-	const frameH = Math.max(120, Math.round(columnWidthPx * (h / w)))
+	// Match MediaCard `aspectRatioStyle` — no artificial min height (avoids estimate vs DOM mismatch).
+	const frameH = Math.max(1, Math.round(columnWidthPx * (h / w)))
 	return frameH + estimateReelFooterHeight(item)
 }
 
@@ -179,13 +191,22 @@ export function ReelsHome() {
 		getEffectiveAccounts,
 		bumpIndexEpoch,
 		indexEpoch,
-		sidebarCategories,
+		assignableCategoryIds,
+		sourcesModalOpen,
+		setSourcesModalOpen,
+		getCategoryMemberAccounts,
+		getHiddenNormsForCategory,
+		setCategoryAccountsWithHidden,
+		hideCustomCategory,
+		isBuiltinCategory,
+		getCategoryLabel,
 	} = useCategoryFilter()
 
 	const [loading, setLoading] = useState(true)
 	const [error, setError] = useState<string | null>(null)
 	const [query, setQuery] = useState("")
 	const [results, setResults] = useState<MediaItem[]>([])
+	const [visibleCount, setVisibleCount] = useState(REELS_PAGE_INITIAL)
 	const [searchPending, setSearchPending] = useState(false)
 	const [sortBy, setSortByState] = useState<SortOption>(getStoredSort)
 
@@ -198,21 +219,18 @@ export function ReelsHome() {
 		}
 	}
 	const [orderOpen, setOrderOpen] = useState(false)
-	const [sourcesOpen, setSourcesOpen] = useState(false)
+	const [categorySettingsOpen, setCategorySettingsOpen] = useState(false)
+	const [headerSettingsCategoryId, setHeaderSettingsCategoryId] = useState<
+		string | null
+	>(null)
+	const [headerOrganizeOpen, setHeaderOrganizeOpen] = useState(false)
 	const [selectedAccounts, setSelectedAccounts] = useState<string[]>([])
 	const categoryAutoFetchAttemptedRef = useRef<Set<string>>(new Set())
 	const queryRef = useRef(query)
 	const accountsRef = useRef(selectedAccounts)
+	const scrollRef = useRef<HTMLDivElement | null>(null)
 	queryRef.current = query
 	accountsRef.current = selectedAccounts
-
-	const assignableCategoryIds = useMemo(
-		() =>
-			sidebarCategories
-				.filter((c) => c.id !== OTHER_CATEGORY_ID)
-				.map((c) => c.id),
-		[sidebarCategories],
-	)
 
 	const otherCategoryAccounts = useMemo(() => {
 		if (!isIndexLoaded()) return []
@@ -237,8 +255,8 @@ export function ReelsHome() {
 	const accountUsernames = useMemo(() => {
 		if (loading || !isIndexLoaded()) return []
 		if (categoryAccounts != null) return categoryAccounts
-		return getFilterOptions().usernames
-	}, [loading, categoryAccounts])
+		return getEffectiveAccounts(ALL_VIDEOS_INDEX_EDITOR_ID)
+	}, [loading, categoryAccounts, getEffectiveAccounts, indexEpoch])
 
 	const computeSearchResults = useCallback((): MediaItem[] => {
 		if (!isIndexLoaded()) return []
@@ -247,22 +265,21 @@ export function ReelsHome() {
 			? selectedCategory === OTHER_CATEGORY_ID
 				? otherCategoryAccounts
 				: getEffectiveAccounts(selectedCategory)
-			: null
+			: getEffectiveAccounts(ALL_VIDEOS_INDEX_EDITOR_ID)
 
-		let usernames: string[] | undefined
-		if (cat != null) {
-			if (cat.length === 0) return []
-			const allowed = new Set(cat.map((u) => normalizeForSearch(u)))
-			const picked = accountsRef.current.filter((u) =>
-				allowed.has(normalizeForSearch(u)),
-			)
-			usernames = picked.length > 0 ? picked : cat
-		} else {
-			usernames =
-				accountsRef.current.length > 0 ? accountsRef.current : undefined
-		}
-		return search({ q, usernames, limit: 80 })
-	}, [selectedCategory, getEffectiveAccounts, otherCategoryAccounts])
+		if (cat.length === 0) return []
+		const allowed = new Set(cat.map((u) => normalizeForSearch(u)))
+		const picked = accountsRef.current.filter((u) =>
+			allowed.has(normalizeForSearch(u)),
+		)
+		const usernames = picked.length > 0 ? picked : cat
+		return search({ q, usernames })
+	}, [selectedCategory, getEffectiveAccounts, otherCategoryAccounts, indexEpoch])
+
+	const replaceSearchResults = useCallback(() => {
+		setVisibleCount(REELS_PAGE_INITIAL)
+		setResults(computeSearchResults())
+	}, [computeSearchResults])
 
 	const runSourcesSubmitInBackground = (payload: {
 		accounts: string[]
@@ -273,7 +290,7 @@ export function ReelsHome() {
 			{
 				onSuccess: () => {
 					bumpIndexEpoch()
-					if (isIndexLoaded()) setResults(computeSearchResults())
+					if (isIndexLoaded()) replaceSearchResults()
 				},
 				onSessionError: () => router.push("/sources"),
 			},
@@ -281,12 +298,35 @@ export function ReelsHome() {
 		)
 	}
 
-	const sortedResults = useMemo(
+	const sortedFull = useMemo(
 		() => sortItems(results, sortBy),
 		[results, sortBy],
 	)
+	const sortedResults = useMemo(
+		() => sortedFull.slice(0, visibleCount),
+		[sortedFull, visibleCount],
+	)
 
-	const scrollRef = useRef<HTMLDivElement | null>(null)
+	useEffect(() => {
+		setVisibleCount((c) => Math.min(c, sortedFull.length))
+	}, [sortedFull.length])
+
+	const sortedFullRef = useRef(sortedFull)
+	sortedFullRef.current = sortedFull
+	const visibleCountRef = useRef(visibleCount)
+	visibleCountRef.current = visibleCount
+
+	const tryLoadMoreReels = useCallback(() => {
+		const el = scrollRef.current
+		if (!el) return
+		const fullLen = sortedFullRef.current.length
+		if (visibleCountRef.current >= fullLen) return
+		const { scrollTop, scrollHeight, clientHeight } = el
+		if (scrollHeight - scrollTop - clientHeight > REELS_SCROLL_LOAD_THRESHOLD_PX)
+			return
+		setVisibleCount((c) => Math.min(c + REELS_PAGE_SIZE, fullLen))
+	}, [])
+
 	const [reelsScrollRootEl, setReelsScrollRootEl] =
 		useState<HTMLDivElement | null>(null)
 	const setReelsScrollEl = useCallback((node: HTMLDivElement | null) => {
@@ -294,7 +334,8 @@ export function ReelsHome() {
 		setReelsScrollRootEl(node)
 	}, [])
 	const laneCount = useReelLaneCount()
-	const listVirtualEnabled = !loading && sortedResults.length > 0
+	const listVirtualEnabled =
+		!loading && sortedResults.length >= REELS_VIRTUAL_MIN_ITEMS
 
 	const listInnerRef = useRef<HTMLDivElement | null>(null)
 	const [listInnerWidth, setListInnerWidth] = useState(0)
@@ -356,9 +397,25 @@ export function ReelsHome() {
 		}
 	}, [virtualizer])
 
+	useEffect(() => {
+		if (loading) return
+		const el = scrollRef.current
+		if (!el) return
+		const onScroll = () => tryLoadMoreReels()
+		el.addEventListener("scroll", onScroll, { passive: true })
+		const raf = requestAnimationFrame(() => tryLoadMoreReels())
+		const ro = new ResizeObserver(() => tryLoadMoreReels())
+		ro.observe(el)
+		return () => {
+			cancelAnimationFrame(raf)
+			el.removeEventListener("scroll", onScroll)
+			ro.disconnect()
+		}
+	}, [loading, tryLoadMoreReels, sortedFull.length, visibleCount])
+
 	const runSearchImmediate = () => {
 		if (!isIndexLoaded()) return
-		setResults(computeSearchResults())
+		replaceSearchResults()
 	}
 
 	useEffect(() => {
@@ -373,15 +430,19 @@ export function ReelsHome() {
 	}, [bumpIndexEpoch])
 
 	useEffect(() => {
+		return () => setSourcesModalOpen(false)
+	}, [setSourcesModalOpen])
+
+	useEffect(() => {
 		if (loading || !isIndexLoaded()) return
-		setResults(computeSearchResults())
+		replaceSearchResults()
 	}, [
 		loading,
 		selectedCategory,
 		selectedAccounts,
 		indexEpoch,
 		categoryAccounts,
-		computeSearchResults,
+		replaceSearchResults,
 	])
 
 	useEffect(() => {
@@ -401,7 +462,7 @@ export function ReelsHome() {
 		enqueueMetadataFetchToast(accounts, {
 			onSuccess: () => {
 				bumpIndexEpoch()
-				if (isIndexLoaded()) setResults(computeSearchResults())
+				if (isIndexLoaded()) replaceSearchResults()
 			},
 			onSessionError: () => router.push("/sources"),
 		})
@@ -411,18 +472,18 @@ export function ReelsHome() {
 		getEffectiveAccounts,
 		bumpIndexEpoch,
 		router,
-		computeSearchResults,
+		replaceSearchResults,
 	])
 
 	useEffect(() => {
 		if (!isIndexLoaded()) return
 		setSearchPending(true)
 		const id = setTimeout(() => {
-			setResults(computeSearchResults())
+			replaceSearchResults()
 			setSearchPending(false)
 		}, SEARCH_DEBOUNCE_MS)
 		return () => clearTimeout(id)
-	}, [query, computeSearchResults])
+	}, [query, replaceSearchResults])
 
 	const searchBarWrapRef = useRef<HTMLDivElement>(null)
 	const searchInputRef = useRef<HTMLInputElement>(null)
@@ -486,6 +547,28 @@ export function ReelsHome() {
 		}
 	}, [])
 
+	const headerSettingsTitle = useMemo(() => {
+		if (!selectedCategory)
+			return `Category settings · ${getCategoryLabel(ALL_VIDEOS_INDEX_EDITOR_ID)}`
+		if (selectedCategory === OTHER_CATEGORY_ID)
+			return "Organize unassigned accounts"
+		return `Category settings · ${getCategoryLabel(selectedCategory)}`
+	}, [selectedCategory, getCategoryLabel])
+
+	const openHeaderSettings = useCallback(() => {
+		if (!selectedCategory) {
+			setHeaderSettingsCategoryId(ALL_VIDEOS_INDEX_EDITOR_ID)
+			setCategorySettingsOpen(true)
+			return
+		}
+		if (selectedCategory === OTHER_CATEGORY_ID) {
+			setHeaderOrganizeOpen(true)
+			return
+		}
+		setHeaderSettingsCategoryId(selectedCategory)
+		setCategorySettingsOpen(true)
+	}, [selectedCategory])
+
 	const sortMobileButton = (
 		<Button
 			type="button"
@@ -507,22 +590,76 @@ export function ReelsHome() {
 				type="button"
 				variant="outline"
 				size="icon"
-				onClick={() => setSourcesOpen(true)}
+				onClick={openHeaderSettings}
 				className="h-9 w-9 shrink-0 rounded-lg border-border/80"
-				title="Source accounts"
-				aria-label="Source accounts"
+				title={headerSettingsTitle}
+				aria-label={headerSettingsTitle}
 			>
-				<Plus className="size-5" strokeWidth={2.25} />
+				<Settings className="size-5" strokeWidth={2.25} />
 			</Button>
 		</div>
 	)
 
 	const sourcesModal = (
 		<SourcesModal
-			open={sourcesOpen}
-			onOpenChange={setSourcesOpen}
+			open={sourcesModalOpen}
+			onOpenChange={setSourcesModalOpen}
 			onBackgroundSubmit={runSourcesSubmitInBackground}
 		/>
+	)
+
+	const categorySettingsModal = (
+		<>
+			<AccountOrganizeModal
+				open={headerOrganizeOpen}
+				onOpenChange={setHeaderOrganizeOpen}
+			/>
+			<CategoryAccountsModal
+				open={categorySettingsOpen}
+				onOpenChange={(open) => {
+					setCategorySettingsOpen(open)
+					if (!open) setHeaderSettingsCategoryId(null)
+				}}
+				categoryId={
+					categorySettingsOpen ? headerSettingsCategoryId : null
+				}
+				categoryLabel={
+					headerSettingsCategoryId
+						? getCategoryLabel(headerSettingsCategoryId)
+						: undefined
+				}
+				memberAccounts={
+					headerSettingsCategoryId
+						? getCategoryMemberAccounts(headerSettingsCategoryId)
+						: []
+				}
+				hiddenNormalized={
+					headerSettingsCategoryId
+						? getHiddenNormsForCategory(headerSettingsCategoryId)
+						: []
+				}
+				onPersistAccounts={(usernames, hiddenNorms) => {
+					if (headerSettingsCategoryId)
+						setCategoryAccountsWithHidden(
+							headerSettingsCategoryId,
+							usernames,
+							hiddenNorms,
+						)
+				}}
+				onAfterMetadataSynced={bumpIndexEpoch}
+				showHideCategory={
+					headerSettingsCategoryId != null &&
+					headerSettingsCategoryId !== ALL_VIDEOS_INDEX_EDITOR_ID &&
+					!isBuiltinCategory(headerSettingsCategoryId)
+				}
+				onHideCategory={() => {
+					if (!headerSettingsCategoryId) return
+					hideCustomCategory(headerSettingsCategoryId)
+					setCategorySettingsOpen(false)
+					setHeaderSettingsCategoryId(null)
+				}}
+			/>
+		</>
 	)
 
 	if (error) {
@@ -535,6 +672,7 @@ export function ReelsHome() {
 					</div>
 				</div>
 				{sourcesModal}
+				{categorySettingsModal}
 			</>
 		)
 	}
@@ -564,7 +702,7 @@ export function ReelsHome() {
 								<p className="px-2 py-12 text-center text-muted-foreground pb-24 sm:px-3">
 									No results found.
 								</p>
-							) : (
+							) : listVirtualEnabled ? (
 								<div
 									ref={listInnerRef}
 									className="relative w-full px-2 sm:px-3"
@@ -589,6 +727,19 @@ export function ReelsHome() {
 											</div>
 										)
 									})}
+								</div>
+							) : (
+								<div
+									className={cn(
+										REELS_SKELETON_FLOW_CLASS,
+										"p-2 pb-24 sm:p-3",
+									)}
+								>
+									{sortedResults.map((item) => (
+										<div key={item.id} className={REEL_TILE_WRAP_CLASS}>
+											<MediaCard item={item} />
+										</div>
+									))}
 								</div>
 							)}
 						</div>
@@ -654,6 +805,7 @@ export function ReelsHome() {
 					</div>
 				</div>
 				{sourcesModal}
+				{categorySettingsModal}
 			</div>
 		</PlayingVideoProvider>
 	)
