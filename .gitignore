@@ -50,3 +50,8 @@ next-env.d.ts
 
 
 !.dev.vars.example
+
+# Yerel Instagram çerez dışa aktarımları (asla commit etmeyin)
+www.instagram.com_cookies.txt
+*_cookies.txt
+cookies.txt
