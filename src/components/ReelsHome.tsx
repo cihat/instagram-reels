@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { ArrowUpDown } from "lucide-react"
 import { MediaCard } from "@/components/MediaCard"
 import { PlayingVideoProvider } from "@/contexts/PlayingVideoContext"
@@ -179,6 +180,16 @@ export function ReelsHome() {
 					value={sortBy}
 					onChange={setSortBy}
 				/>
+
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					className="fixed top-4 left-4 z-50 h-9 rounded-xl border-border/80 bg-card/95 px-3 text-xs font-medium shadow-lg backdrop-blur-sm md:text-sm"
+					asChild
+				>
+					<Link href="/kaynaklar">Kaynaklar</Link>
+				</Button>
 
 				<Button
 					type="button"

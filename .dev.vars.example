@@ -1,2 +1,10 @@
-# Copy to .dev.vars for local OpenNext / Wrangler. See https://developers.cloudflare.com/workers/testing/local-development/
+# Copy to .dev.vars for OpenNext / Wrangler preview. `next dev` için aynı anahtarları .env.local içinde kullanın.
 NEXTJS_ENV=development
+
+# POST /api/trigger-fetch — üretimde zorunlu önerilir
+# FETCH_TRIGGER_SECRET=uzun-rastgele-dize
+
+# repository_dispatch tetikleme (PAT: Contents: Read/Write + Metadata veya classic repo scope)
+# GITHUB_REPO_OWNER=sizin-org
+# GITHUB_REPO=reels-search
+# GITHUB_ACTIONS_PAT=ghp_...
