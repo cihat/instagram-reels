@@ -157,6 +157,14 @@ const CATEGORY_ICONS: Record<ReelCategoryId, typeof Video> = {
 const REELS_PATH = "/reels"
 const SOURCES_PATH = "/sources"
 
+/** Desktop: action icons fade in on row hover / keyboard focus. Mobile: always visible, larger tap targets. */
+const sidebarRowActionReveal =
+	"transition-opacity duration-150 max-md:pointer-events-auto max-md:opacity-100 max-md:h-10 max-md:w-10 md:pointer-events-none md:opacity-0 md:group-hover/menu-item:pointer-events-auto md:group-hover/menu-item:opacity-100 md:group-focus-within/menu-item:pointer-events-auto md:group-focus-within/menu-item:opacity-100"
+
+/** Desktop: “Categories” toolbar icon shows on section hover. Mobile: always visible. */
+const sidebarCategoriesHeaderActionReveal =
+	"transition-opacity duration-150 max-md:pointer-events-auto max-md:opacity-100 max-md:h-9 max-md:w-9 md:pointer-events-none md:opacity-0 md:group-hover/categories:pointer-events-auto md:group-hover/categories:opacity-100 md:group-focus-within/categories:pointer-events-auto md:group-focus-within/categories:opacity-100"
+
 export function AppSidebar() {
 	const pathname = usePathname()
 	const {
@@ -259,13 +267,16 @@ export function AppSidebar() {
 					</SidebarGroup>
 
 					<SidebarGroup>
-						<SidebarGroupLabel className="flex items-center justify-between gap-2 pr-1">
+						<SidebarGroupLabel className="group/categories flex items-center justify-between gap-2 pr-1">
 							<span>Categories</span>
 							<Button
 								type="button"
 								variant="ghost"
 								size="icon-sm"
-								className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden"
+								className={cn(
+									"h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden",
+									sidebarCategoriesHeaderActionReveal,
+								)}
 								title="Organize accounts (drag between categories)"
 								aria-label="Organize accounts"
 								onClick={() => setOrganizeOpen(true)}
@@ -304,6 +315,7 @@ export function AppSidebar() {
 													size="icon-sm"
 													className={cn(
 														"h-8 w-8 shrink-0 group-data-[collapsible=icon]:hidden",
+														sidebarRowActionReveal,
 														isFav
 															? "text-amber-500 hover:text-amber-600"
 															: "text-muted-foreground hover:text-foreground",
@@ -336,7 +348,10 @@ export function AppSidebar() {
 													type="button"
 													variant="ghost"
 													size="icon-sm"
-													className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden"
+													className={cn(
+														"h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden",
+														sidebarRowActionReveal,
+													)}
 													onClick={(e) => {
 														e.preventDefault()
 														e.stopPropagation()
