@@ -2,7 +2,7 @@ export type RateLimitDenied = { ok: false; retryAfterSec: number }
 export type RateLimitOk = { ok: true }
 export type RateLimitOutcome = RateLimitOk | RateLimitDenied
 
-/** Workers / proxy arkasında istemci IP (R2 abuse sınırları için). */
+/** Client IP behind Workers / proxy (for R2 abuse limits). */
 export function clientIpFromRequest(request: Request): string {
 	const cf = request.headers.get("cf-connecting-ip")?.trim()
 	if (cf) return cf
@@ -14,8 +14,8 @@ export function clientIpFromRequest(request: Request): string {
 }
 
 /**
- * KV üzerinde sabit pencere sayacı. Bağlama yoksa (ör. `next dev`) sınır uygulanmaz.
- * Yarış koşullarında limit hafif aşılabilir; kötüye kullanımı kesmek için yeterli.
+ * Fixed-window counter in KV. If the binding is missing (e.g. `next dev`), no limit is applied.
+ * Under races the limit may be slightly exceeded; enough to curb abuse.
  */
 export async function consumeKvRateLimit(
 	kv: KVNamespace | undefined,
@@ -42,7 +42,7 @@ export async function consumeKvRateLimit(
 	return { ok: true }
 }
 
-/** GET /api/reels — R2 index.json okuma */
+/** GET /api/reels — read R2 index.json */
 export const R2_READ_LIMIT = 160
 export const R2_READ_WINDOW_SEC = 60
 

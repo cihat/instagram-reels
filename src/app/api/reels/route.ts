@@ -54,7 +54,7 @@ export async function GET(request: Request) {
 						}
 					}
 				} catch {
-					// geçersiz JSON: ham metin
+					// invalid JSON: return raw text
 				}
 				return new NextResponse(text, { headers })
 			}
@@ -74,7 +74,7 @@ export async function GET(request: Request) {
 				return new NextResponse(JSON.stringify(clean), { headers })
 			}
 		} catch {
-			// geçersiz JSON
+			// invalid JSON
 		}
 		return new NextResponse(text, { headers })
 	}

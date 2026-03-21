@@ -1,12 +1,12 @@
-# Copy to .dev.vars for OpenNext / Wrangler preview. `next dev` için aynı anahtarları .env.local içinde kullanın.
+# Copy to .dev.vars for OpenNext / Wrangler preview. For `next dev`, use the same keys in `.env.local`.
 NEXTJS_ENV=development
 
-# POST /api/fetch-metadata — üretimde zorunlu önerilir
-# FETCH_TRIGGER_SECRET=uzun-rastgele-dize
+# POST /api/fetch-metadata — strongly recommended in production
+# FETCH_TRIGGER_SECRET=long-random-string
 
-# Instagram web isteği + /api/image-proxy (thumbnail’ler) için tarayıcıdan kopyalanan Cookie satırı (sessionid=…; csrftoken=…; …)
+# Cookie line copied from the browser for Instagram web requests + /api/image-proxy (thumbnails) (sessionid=…; csrftoken=…; …)
 # INSTAGRAM_COOKIES=
 
-# Üretim (Workers): çerezi repoya yazma — bir kez şunu çalıştır, değeri yapıştır:
+# Production (Workers): do not commit cookies to the repo — run once, then paste the value:
 #   npx wrangler secret put INSTAGRAM_COOKIES
-# Aksi halde `wrangler deploy` Dashboard’daki INSTAGRAM_COOKIES değişkenini silebilir.
+# Otherwise `wrangler deploy` may clear the INSTAGRAM_COOKIES variable from the Dashboard.

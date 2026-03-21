@@ -34,7 +34,7 @@
 	"r2_buckets": [
 		{ "binding": "REELS_BUCKET", "bucket_name": "reels-search-data" }
 	],
-	// Abuse koruması: R2 okuma/yazma ve ağır metadata istekleri için IP başına sınır (KV).
+	// Abuse protection: per-IP limits for R2 reads/writes and heavy metadata requests (KV).
 	"kv_namespaces": [
 		{
 			"binding": "RATE_LIMIT_KV",

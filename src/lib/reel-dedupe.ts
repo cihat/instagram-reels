@@ -11,7 +11,7 @@ function shortcodeFromPostUrl(postUrl: string | undefined): string {
 	}
 }
 
-/** Tek bir reel için kararlı anahtar: mümkünse shortcode (URL'den de çıkarılır). */
+/** Stable key for one reel: prefer shortcode (also parsed from URL when missing). */
 export function reelMergeKey(item: MediaItem): string {
 	const sc = String(item.shortcode || "").trim().toLowerCase()
 	if (sc) return sc
@@ -46,7 +46,7 @@ function dedupePass(
 }
 
 /**
- * Aynı reel (shortcode veya Instagram post_id) yalnızca bir kez kalır; daha dolu kayıt tercih edilir.
+ * Same reel (shortcode or Instagram post_id) appears once; the richer record wins ties.
  */
 export function dedupeMediaItemsByReel(items: MediaItem[]): MediaItem[] {
 	let v = dedupePass(items, reelMergeKey)
