@@ -3,6 +3,14 @@ import type { MediaItem } from "@/lib/types"
 const UA =
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
+/** Instagram web istemcisi (profil / JSON API) */
+const IG_APP_ID = "936619743392459"
+
+function csrftokenFromCookie(cookie: string): string | undefined {
+	const m = cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/i)
+	return m?.[1]?.trim()
+}
+
 function formatFetchError(e: unknown): string {
 	if (!(e instanceof Error)) return String(e)
 	const parts: string[] = [e.message]
@@ -68,14 +76,31 @@ function parseScriptJsonBlocks(html: string): unknown[] {
 			// skip
 		}
 	}
+	const next = html.match(
+		/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i,
+	)
+	if (next?.[1]) {
+		try {
+			blocks.push(JSON.parse(next[1]))
+		} catch {
+			// skip
+		}
+	}
 	return blocks
 }
 
 function videoUrlFromNode(node: Record<string, unknown>): string {
 	const vv = node.video_versions
 	if (Array.isArray(vv) && vv.length > 0) {
-		const first = vv[0] as Record<string, unknown>
-		if (typeof first.url === "string") return first.url
+		const sorted = [...vv].sort((a, b) => {
+			const wa = Number((a as Record<string, unknown>).width) || 0
+			const wb = Number((b as Record<string, unknown>).width) || 0
+			return wb - wa
+		})
+		for (const v of sorted) {
+			const u = (v as Record<string, unknown>).url
+			if (typeof u === "string" && u.length > 0) return u
+		}
 	}
 	if (typeof node.video_url === "string") return node.video_url
 	return ""
@@ -114,11 +139,186 @@ function likesFromNode(node: Record<string, unknown>): number {
 }
 
 function takenAtFromNode(node: Record<string, unknown>): string {
-	const t = node.taken_at
+	const t = node.taken_at ?? node.taken_at_timestamp
 	if (typeof t === "number") {
 		return new Date(t * 1000).toISOString().replace("T", " ").slice(0, 19)
 	}
 	return ""
+}
+
+function isVideoLikeNode(node: Record<string, unknown>): boolean {
+	if (node.is_video === true) return true
+	if (node.__typename === "GraphVideo") return true
+	const pt = node.product_type
+	if (typeof pt === "string" && (pt === "clips" || pt === "igtv")) return true
+	if (
+		typeof pt === "string" &&
+		pt === "feed" &&
+		(node.is_video === true ||
+			Array.isArray(node.video_versions) ||
+			typeof node.video_url === "string")
+	)
+		return true
+	if (Array.isArray(node.video_versions) && node.video_versions.length > 0) return true
+	if (typeof node.video_url === "string" && node.video_url.length > 0) return true
+	return false
+}
+
+function dedupeByShortcode(items: MediaItem[]): MediaItem[] {
+	const m = new Map<string, MediaItem>()
+	for (const i of items) m.set(i.shortcode, i)
+	return [...m.values()]
+}
+
+function checkIgApiJson(json: unknown): void {
+	const j = json as Record<string, unknown>
+	if (j.status === "fail") {
+		throw new Error(String(j.message ?? "Instagram API status fail"))
+	}
+}
+
+async function fetchInstagramJson(
+	url: string,
+	cookie: string,
+	referer: string,
+): Promise<unknown> {
+	const csrf = csrftokenFromCookie(cookie)
+	const headers: Record<string, string> = {
+		"User-Agent": UA,
+		Accept: "*/*",
+		"Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+		"X-IG-App-ID": IG_APP_ID,
+		"X-Requested-With": "XMLHttpRequest",
+		"X-ASBD-ID": "129477",
+		Referer: referer,
+		Cookie: cookie,
+	}
+	if (csrf) headers["X-CSRFToken"] = csrf
+
+	let res = await fetch(url, { headers, cache: "no-store" })
+	if (!res.ok) {
+		res = await fetch(url, {
+			headers: {
+				"User-Agent": UA,
+				Accept: "application/json",
+				Cookie: cookie,
+				Referer: referer,
+			},
+			cache: "no-store",
+		})
+	}
+	const text = await res.text()
+	if (!res.ok) {
+		throw new Error(`API ${res.status} ${text.slice(0, 280)}`)
+	}
+	try {
+		return JSON.parse(text) as unknown
+	} catch {
+		throw new Error(`API yanıtı JSON değil: ${text.slice(0, 120)}`)
+	}
+}
+
+function timelineItemsFromUser(
+	user: Record<string, unknown>,
+	username: string,
+	fullname: string,
+): MediaItem[] {
+	const out: MediaItem[] = []
+	const edgeKeys = [
+		"edge_felix_video_timeline",
+		"edge_owner_to_timeline_media",
+	] as const
+
+	for (const key of edgeKeys) {
+		const edge = user[key] as Record<string, unknown> | undefined
+		const edges = edge?.edges as unknown[] | undefined
+		if (!Array.isArray(edges)) continue
+		for (const e of edges) {
+			const node = (e as Record<string, unknown>).node as
+				| Record<string, unknown>
+				| undefined
+			if (!node) continue
+
+			if (node.__typename === "GraphSidecar") {
+				const ch = node.edge_sidecar_to_children as
+					| Record<string, unknown>
+					| undefined
+				const cedges = ch?.edges as unknown[] | undefined
+				if (Array.isArray(cedges)) {
+					for (const ce of cedges) {
+						const cn = (ce as Record<string, unknown>).node as
+							| Record<string, unknown>
+							| undefined
+						if (cn && isVideoLikeNode(cn)) {
+							const item = nodeToMediaItem(cn, username, fullname)
+							if (item) out.push(item)
+						}
+					}
+				}
+				continue
+			}
+
+			if (isVideoLikeNode(node)) {
+				const item = nodeToMediaItem(node, username, fullname)
+				if (item) out.push(item)
+			}
+		}
+	}
+	return dedupeByShortcode(out)
+}
+
+function itemsFromWebProfileJson(json: unknown, username: string): MediaItem[] {
+	const j = json as Record<string, unknown>
+	const data = j.data as Record<string, unknown> | undefined
+	const user = data?.user as Record<string, unknown> | undefined
+	if (!user) return []
+	const fullname =
+		typeof user.full_name === "string" ? user.full_name : username
+	return timelineItemsFromUser(user, username, fullname)
+}
+
+function extractUserId(user: Record<string, unknown>): string | undefined {
+	const id = user.id ?? user.pk
+	if (typeof id === "string" || typeof id === "number")
+		return String(id)
+	return undefined
+}
+
+async function itemsFromClipsApi(
+	userId: string,
+	username: string,
+	fullname: string,
+	cookie: string,
+	referer: string,
+): Promise<MediaItem[]> {
+	const q = new URLSearchParams({
+		include_feed_video: "true",
+		page_size: "24",
+		target_user_id: userId,
+	})
+	const url = `https://www.instagram.com/api/v1/clips/user/?${q.toString()}`
+	const json = await fetchInstagramJson(url, cookie, referer)
+	checkIgApiJson(json)
+	const out: MediaItem[] = []
+	const root = json as Record<string, unknown>
+	const rows = root.items as unknown[] | undefined
+	if (Array.isArray(rows)) {
+		for (const row of rows) {
+			const r = row as Record<string, unknown>
+			const media = r.media as Record<string, unknown> | undefined
+			if (media) {
+				const item = nodeToMediaItem(media, username, fullname)
+				if (item) out.push(item)
+			}
+		}
+	}
+	if (out.length === 0) {
+		for (const node of collectMediaNodes(json, 200)) {
+			const item = nodeToMediaItem(node, username, fullname)
+			if (item) out.push(item)
+		}
+	}
+	return dedupeByShortcode(out)
 }
 
 function nodeToMediaItem(
@@ -131,7 +331,9 @@ function nodeToMediaItem(
 	const postId = String(node.id ?? node.pk ?? shortcode)
 	const video_url = videoUrlFromNode(node)
 	const display_url = displayUrlFromNode(node)
+	/* Video gizlendiğinde yalnızca kapak + gönderi linki */
 	if (!video_url && !display_url) return null
+	if (!video_url && display_url && !isVideoLikeNode(node)) return null
 
 	const description = captionFromNode(node)
 	const tags =
@@ -266,6 +468,62 @@ export async function fetchReelsForUser(
 
 	const reelsUrl = `https://www.instagram.com/${encodeURIComponent(username)}/reels/`
 	const profileUrl = `https://www.instagram.com/${encodeURIComponent(username)}/`
+	const profileReferer = profileUrl
+
+	const pushItem = (item: MediaItem) => {
+		if (seenShort.has(item.shortcode)) return
+		if (items.length >= cap) return
+		seenShort.add(item.shortcode)
+		items.push(item)
+	}
+
+	// 1) Resmi JSON API (HTML’de artık sık sık veri yok)
+	try {
+		const infoUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`
+		const profileJson = await fetchInstagramJson(
+			infoUrl,
+			cookie,
+			profileReferer,
+		)
+		checkIgApiJson(profileJson)
+		const fromProfile = itemsFromWebProfileJson(profileJson, username)
+		for (const it of fromProfile) pushItem(it)
+
+		const data = (profileJson as Record<string, unknown>).data as
+			| Record<string, unknown>
+			| undefined
+		const user = data?.user as Record<string, unknown> | undefined
+		const uid = user ? extractUserId(user) : undefined
+		const fullname =
+			user && typeof user.full_name === "string"
+				? user.full_name
+				: username
+
+		if (uid && items.length < cap) {
+			try {
+				const fromClips = await itemsFromClipsApi(
+					uid,
+					username,
+					fullname,
+					cookie,
+					reelsUrl,
+				)
+				for (const it of fromClips) pushItem(it)
+			} catch (e) {
+				warnings.push(
+					`${username} clips API: ${formatFetchError(e)}`,
+				)
+			}
+		}
+	} catch (e) {
+		warnings.push(
+			`${username} web_profile_info: ${formatFetchError(e)}`,
+		)
+	}
+
+	if (items.length >= cap) {
+		return { items, warnings }
+	}
 
 	let html: string | null = null
 	try {
@@ -308,14 +566,11 @@ export async function fetchReelsForUser(
 	for (const block of parseScriptJsonBlocks(html)) {
 		for (const node of collectMediaNodes(block)) {
 			const item = nodeToMediaItem(node, username, username)
-			if (item && !seenShort.has(item.shortcode)) {
-				seenShort.add(item.shortcode)
-				items.push(item)
-			}
+			if (item) pushItem(item)
 		}
 	}
 
-	if (items.length === 0) {
+	if (items.length < cap) {
 		const codes = shortcodesFromHtml(html, cap)
 		for (const code of codes) {
 			if (seenShort.has(code)) continue
@@ -330,10 +585,7 @@ export async function fetchReelsForUser(
 					for (const node of collectMediaNodes(block, 40)) {
 						const item = nodeToMediaItem(node, username, username)
 						if (item && item.shortcode === code) {
-							if (!seenShort.has(item.shortcode)) {
-								seenShort.add(item.shortcode)
-								items.push(item)
-							}
+							pushItem(item)
 							break
 						}
 					}
@@ -349,7 +601,7 @@ export async function fetchReelsForUser(
 
 	if (items.length === 0) {
 		warnings.push(
-			`${username}: medya bulunamadı (oturum çerezi veya Instagram HTML yapısı).`,
+			`${username}: medya bulunamadı. Çerezde sessionid + csrftoken olduğundan emin olun; hesap gizli veya engellenmiş olabilir.`,
 		)
 	}
 
