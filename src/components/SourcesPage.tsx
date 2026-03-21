@@ -1,16 +1,19 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useState } from "react"
 import { ArrowLeft, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { invalidateSearchIndex } from "@/lib/search"
 import { cn } from "@/lib/utils"
 
 const STORAGE_ACCOUNTS = "reels-sources-accounts"
 const STORAGE_SECRET = "reels-sources-trigger-secret"
 
 export function SourcesPage() {
+	const router = useRouter()
 	const [accountsText, setAccountsText] = useState("")
 	const [secret, setSecret] = useState("")
 	const [loading, setLoading] = useState(false)
@@ -91,7 +94,8 @@ export function SourcesPage() {
 				setError(body || "Çekim başarısız")
 				return
 			}
-			setMessage(body)
+			invalidateSearchIndex()
+			router.push("/")
 		} catch {
 			setError("Ağ hatası — tekrar deneyin.")
 		} finally {

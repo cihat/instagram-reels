@@ -36,6 +36,13 @@ let items: MediaItem[] = []
 let idToItem: Map<string, MediaItem> = new Map()
 let fuse: Fuse<SearchDoc> | null = null
 
+/** Yeni metadata sonrası ana sayfada taze index için */
+export function invalidateSearchIndex(): void {
+	fuse = null
+	items = []
+	idToItem = new Map()
+}
+
 function buildSearchString(item: MediaItem): string {
 	const parts = [
 		item.description,
@@ -54,7 +61,7 @@ function buildSearchString(item: MediaItem): string {
 
 export async function loadIndex(): Promise<void> {
 	if (fuse) return
-	const res = await fetch(INDEX_URL)
+	const res = await fetch(INDEX_URL, { cache: "no-store" })
 	if (!res.ok) throw new Error("Failed to load index")
 	items = (await res.json()) as MediaItem[]
 	if (!Array.isArray(items)) {
