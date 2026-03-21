@@ -129,15 +129,22 @@ export async function POST(request: Request) {
 		)
 	}
 
+	const message =
+		fetched.length === 0
+			? persisted
+				? "Yeni öğe yok; mevcut index korundu. Uyarıları okuyun."
+				: "Yeni öğe çekilemedi. Uyarıları okuyun."
+			: persisted
+				? "Metadata çekildi ve index güncellendi. Sayfayı yenileyin."
+				: "Metadata çekildi; R2 yoksa uygulama eski index’i gösterebilir."
+
 	return NextResponse.json({
-		ok: true,
+		ok: fetched.length > 0,
 		persisted,
 		accounts,
 		fetchedCount: fetched.length,
 		mergedCount: merged.length,
 		warnings: allWarnings,
-		message: persisted
-			? "Metadata çekildi ve index güncellendi. Sayfayı yenileyin."
-			: "Metadata çekildi; R2 yoksa uygulama eski index’i gösterebilir.",
+		message,
 	})
 }

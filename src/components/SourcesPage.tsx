@@ -83,11 +83,15 @@ export function SourcesPage() {
 			const persistNote = data.persisted === false
 				? "\n\nNot: R2’ye yazılamadı — üretimde Wrangler’da REELS_BUCKET bağlayın."
 				: ""
-			setMessage(
-				[data.message, warnText ? `Uyarılar:\n${warnText}` : "", persistNote]
-					.filter(Boolean)
-					.join("\n\n"),
-			)
+			const body = [data.message, warnText ? `Uyarılar:\n${warnText}` : "", persistNote]
+				.filter(Boolean)
+				.join("\n\n")
+
+			if (data.ok === false) {
+				setError(body || "Çekim başarısız")
+				return
+			}
+			setMessage(body)
 		} catch {
 			setError("Ağ hatası — tekrar deneyin.")
 		} finally {
