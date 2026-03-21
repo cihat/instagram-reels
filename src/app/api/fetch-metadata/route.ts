@@ -1,4 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import { instagramCookieHeaderFromUserInput } from "@/lib/instagram-cookie-input"
 import { fetchReelsForUser } from "@/lib/instagram-reels"
 import type { MediaItem } from "@/lib/types"
 import { NextResponse } from "next/server"
@@ -36,27 +37,37 @@ function mergeByShortcode(existing: MediaItem[], incoming: MediaItem[]): MediaIt
 const MAX_ACCOUNTS_PER_REQUEST = 8
 
 /**
- * Instagram’a doğrudan fetch; sonucu R2 `index.json` ile birleştirir (binding varsa).
+ * Fetches Instagram directly; merges with R2 `index.json` when the binding exists.
  */
 export async function POST(request: Request) {
 	let body: { secret?: string; accounts?: unknown }
 	try {
 		body = (await request.json()) as { secret?: string; accounts?: unknown }
 	} catch {
-		return NextResponse.json({ error: "Geçersiz JSON" }, { status: 400 })
+		return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
 	}
 
+	const rawInput =
+		typeof body.secret === "string" ? body.secret : ""
+	const trimmedInput = rawInput.trim()
+	const cookieFromBody = instagramCookieHeaderFromUserInput(rawInput)
 	const expectedSecret = getEnv("FETCH_TRIGGER_SECRET")
-	if (expectedSecret && body.secret !== expectedSecret) {
-		return NextResponse.json({ error: "Yetkisiz" }, { status: 401 })
+	const envCookie = getEnv("INSTAGRAM_COOKIES")
+
+	if (expectedSecret) {
+		const secretOk = trimmedInput === expectedSecret
+		const cookieOk = Boolean(cookieFromBody)
+		if (!secretOk && !cookieOk) {
+			return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+		}
 	}
 
-	const cookie = getEnv("INSTAGRAM_COOKIES")
+	const cookie = cookieFromBody || envCookie
 	if (!cookie) {
 		return NextResponse.json(
 			{
 				error:
-					"INSTAGRAM_COOKIES tanımlı değil. Tarayıcıdan kopyaladığınız Cookie üstbilgisini (sessionid, csrftoken, …) Cloudflare secret / .dev.vars olarak ekleyin.",
+					"No Instagram session found. Paste a cookie export in the form (Netscape file, or sessionid / csrftoken text), or set INSTAGRAM_COOKIES on the server.",
 			},
 			{ status: 503 },
 		)
@@ -65,7 +76,7 @@ export async function POST(request: Request) {
 	const accounts = normalizeAccounts(body.accounts)
 	if (accounts.length === 0) {
 		return NextResponse.json(
-			{ error: "En az bir geçerli kullanıcı adı gerekli" },
+			{ error: "At least one valid username is required" },
 			{ status: 400 },
 		)
 	}
@@ -73,7 +84,7 @@ export async function POST(request: Request) {
 	if (accounts.length > MAX_ACCOUNTS_PER_REQUEST) {
 		return NextResponse.json(
 			{
-				error: `En fazla ${MAX_ACCOUNTS_PER_REQUEST} hesap (üst sınır).`,
+				error: `At most ${MAX_ACCOUNTS_PER_REQUEST} accounts per request.`,
 			},
 			{ status: 400 },
 		)
@@ -105,7 +116,9 @@ export async function POST(request: Request) {
 				if (Array.isArray(parsed)) existing = parsed as MediaItem[]
 			}
 		} catch {
-			allWarnings.push("Mevcut index.json okunamadı; yalnızca yeni öğeler yazılacak.")
+			allWarnings.push(
+				"Could not read existing index.json; only new items will be written.",
+			)
 		}
 	}
 
@@ -120,23 +133,23 @@ export async function POST(request: Request) {
 			persisted = true
 		} catch (e) {
 			allWarnings.push(
-				`R2 yazılamadı: ${e instanceof Error ? e.message : String(e)}`,
+				`R2 write failed: ${e instanceof Error ? e.message : String(e)}`,
 			)
 		}
 	} else {
 		allWarnings.push(
-			"REELS_BUCKET bağlı değil — bu ortamda index kalıcı güncellenmedi (OpenNext/Wrangler ile R2 ekleyin).",
+			"REELS_BUCKET is not bound — the index was not persisted in this environment (add R2 with OpenNext/Wrangler).",
 		)
 	}
 
 	const message =
 		fetched.length === 0
 			? persisted
-				? "Yeni öğe yok; mevcut index korundu. Uyarıları okuyun."
-				: "Yeni öğe çekilemedi. Uyarıları okuyun."
+				? "No new items; existing index kept. Review warnings."
+				: "No new items fetched. Review warnings."
 			: persisted
-				? "Metadata çekildi ve index güncellendi. Sayfayı yenileyin."
-				: "Metadata çekildi; R2 yoksa uygulama eski index’i gösterebilir."
+				? "Metadata fetched and index updated. Refresh the page."
+				: "Metadata fetched; without R2 the app may still show a stale index."
 
 	return NextResponse.json({
 		ok: fetched.length > 0,

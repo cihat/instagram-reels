@@ -1,12 +1,23 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from "next"
+import withPWAInit from "@ducanh2912/next-pwa"
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare"
+
+const withPWA = withPWAInit({
+	dest: "public",
+	disable: process.env.NODE_ENV === "development",
+	register: true,
+	scope: "/",
+})
 
 const nextConfig: NextConfig = {
-	/* config options here */
-};
+	async redirects() {
+		return [{ source: "/kaynaklar", destination: "/sources", permanent: true }]
+	},
+}
 
-export default nextConfig;
+initOpenNextCloudflareForDev()
 
-// Enable calling `getCloudflareContext()` in `next dev`.
-// See https://opennext.js.org/cloudflare/bindings#local-access-to-bindings.
-import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
-initOpenNextCloudflareForDev();
+// Skip the PWA webpack plugin in development so `next dev` can use Turbopack (Next.js 16 default).
+export default process.env.NODE_ENV === "development"
+	? nextConfig
+	: withPWA(nextConfig)

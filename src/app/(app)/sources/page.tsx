@@ -2,11 +2,11 @@ import type { Metadata } from "next"
 import { SourcesPage } from "@/components/SourcesPage"
 
 export const metadata: Metadata = {
-	title: "Kaynak hesaplar",
+	title: "Source accounts",
 	description:
-		"Takip edilen Instagram hesapları; reels metadata çekimini tetikleme (video yok).",
+		"Manage Instagram usernames and trigger server-side metadata fetch for your index.",
 }
 
-export default function KaynaklarPage() {
+export default function SourcesRoutePage() {
 	return <SourcesPage />
 }

@@ -25,6 +25,8 @@ export interface SearchParams {
 	q?: string
 	tag?: string
 	username?: string
+	/** When non-empty, only items from these usernames (normalized match) */
+	usernames?: string[]
 	category?: string
 	type?: string
 	limit?: number

@@ -107,10 +107,26 @@ function videoUrlFromNode(node: Record<string, unknown>): string {
 }
 
 function displayUrlFromNode(node: Record<string, unknown>): string {
-	if (typeof node.display_url === "string") return node.display_url
+	if (typeof node.display_url === "string" && node.display_url) return node.display_url
+	if (typeof node.thumbnail_src === "string" && node.thumbnail_src)
+		return node.thumbnail_src
+	if (typeof node.thumbnail_url === "string" && node.thumbnail_url)
+		return node.thumbnail_url
 	const iv = node.image_versions2 as Record<string, unknown> | undefined
 	const c = iv?.candidates
 	if (Array.isArray(c) && c.length > 0) {
+		let best = ""
+		let bestW = 0
+		for (const cand of c) {
+			const o = cand as Record<string, unknown>
+			const u = o.url
+			const w = Number(o.width) || 0
+			if (typeof u === "string" && u.length > 0 && w >= bestW) {
+				best = u
+				bestW = w
+			}
+		}
+		if (best) return best
 		const u = (c[0] as Record<string, unknown>).url
 		if (typeof u === "string") return u
 	}
@@ -186,7 +202,7 @@ async function fetchInstagramJson(
 	const headers: Record<string, string> = {
 		"User-Agent": UA,
 		Accept: "*/*",
-		"Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+		"Accept-Language": "en-US,en;q=0.9",
 		"X-IG-App-ID": IG_APP_ID,
 		"X-Requested-With": "XMLHttpRequest",
 		"X-ASBD-ID": "129477",
@@ -214,7 +230,7 @@ async function fetchInstagramJson(
 	try {
 		return JSON.parse(text) as unknown
 	} catch {
-		throw new Error(`API yanıtı JSON değil: ${text.slice(0, 120)}`)
+		throw new Error(`API response is not JSON: ${text.slice(0, 120)}`)
 	}
 }
 
@@ -331,7 +347,7 @@ function nodeToMediaItem(
 	const postId = String(node.id ?? node.pk ?? shortcode)
 	const video_url = videoUrlFromNode(node)
 	const display_url = displayUrlFromNode(node)
-	/* Video gizlendiğinde yalnızca kapak + gönderi linki */
+	/* When video is hidden, only cover + post link */
 	if (!video_url && !display_url) return null
 	if (!video_url && display_url && !isVideoLikeNode(node)) return null
 
@@ -377,7 +393,7 @@ function shortcodesFromHtml(html: string, limit: number): string[] {
 type HtmlFetchMode = "cold" | "sameSite"
 
 /**
- * HTML sayfası = tarayıcı navigasyonu; X-Requested-With / CSRF ekleme (Instagram bağlantıyı kesebiliyor).
+ * HTML page = browser-like navigation; avoid X-Requested-With / extra CSRF (Instagram may cut the connection).
  */
 async function fetchHtml(
 	url: string,
@@ -389,7 +405,7 @@ async function fetchHtml(
 		"User-Agent": UA,
 		Accept:
 			"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-		"Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+		"Accept-Language": "en-US,en;q=0.9",
 		Cookie: cookie,
 		Referer: referer,
 		"Sec-Fetch-Dest": "document",
@@ -414,7 +430,7 @@ async function fetchHtml(
 	return res.text()
 }
 
-/** Yalnızca UA + Cookie — bazı ortamlarda daha az agresif engel */
+/** UA + Cookie only — sometimes hits fewer blocks */
 async function fetchHtmlMinimal(url: string, cookie: string): Promise<string> {
 	const res = await fetch(url, {
 		redirect: "follow",
@@ -454,7 +470,7 @@ async function fetchHtmlWithRetries(
 }
 
 /**
- * Tek kullanıcı için /reels/ ve gerekirse tek tek /reel/{shortcode}/ sayfalarından öğe toplar.
+ * Collects items for one user from /reels/ and, if needed, individual /reel/{shortcode}/ pages.
  */
 export async function fetchReelsForUser(
 	username: string,
@@ -477,7 +493,7 @@ export async function fetchReelsForUser(
 		items.push(item)
 	}
 
-	// 1) Resmi JSON API (HTML’de artık sık sık veri yok)
+	// 1) Official JSON API (HTML often no longer embeds enough data)
 	try {
 		const infoUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`
 		const profileJson = await fetchInstagramJson(
@@ -543,15 +559,15 @@ export async function fetchReelsForUser(
 				"https://www.instagram.com/",
 			)
 			warnings.push(
-				`${username}: /reels/ açılamadı (${detail}); profil sayfası denendi.`,
+				`${username}: could not open /reels/ (${detail}); tried profile page.`,
 			)
 		} catch (e2) {
 			warnings.push(
-				`${username}: liste yüklenemedi — ${detail} | profil: ${formatFetchError(e2)}`,
+				`${username}: could not load list — ${detail} | profile: ${formatFetchError(e2)}`,
 			)
 			if (isLikelyEdgeBlockMessage(detail) || isLikelyEdgeBlockMessage(formatFetchError(e2))) {
 				warnings.push(
-					"Instagram isteği sunucu çıkış IP’sinden reddedilmiş olabilir (Cloudflare Workers sık görülür). Aynı INSTAGRAM_COOKIES ile yerelde `npm run dev` deneyin veya metadata için gallery-dl / GitHub Actions kullanın.",
+					"Instagram may be blocking the server egress IP (common on Cloudflare Workers). Try `npm run dev` locally with the same INSTAGRAM_COOKIES, or use gallery-dl / GitHub Actions for metadata.",
 				)
 			}
 			return { items, warnings }
@@ -559,7 +575,7 @@ export async function fetchReelsForUser(
 	}
 
 	if (!html) {
-		warnings.push(`${username}: boş yanıt`)
+		warnings.push(`${username}: empty response`)
 		return { items, warnings }
 	}
 
@@ -601,7 +617,7 @@ export async function fetchReelsForUser(
 
 	if (items.length === 0) {
 		warnings.push(
-			`${username}: medya bulunamadı. Çerezde sessionid + csrftoken olduğundan emin olun; hesap gizli veya engellenmiş olabilir.`,
+			`${username}: no media found. Ensure sessionid and csrftoken are present in cookies; the account may be private or blocked.`,
 		)
 	}
 

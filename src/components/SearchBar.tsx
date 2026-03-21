@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback } from "react"
-import { ArrowUpDown, Loader2, Search, X } from "lucide-react"
+import { useCallback, type RefObject } from "react"
+import { ArrowUpDown, ChevronDown, Loader2, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -14,6 +14,8 @@ interface SearchBarProps {
 	pending?: boolean
 	placeholder?: string
 	className?: string
+	inputRef?: RefObject<HTMLInputElement | null>
+	onCollapse?: () => void
 }
 
 export function SearchBar({
@@ -22,8 +24,10 @@ export function SearchBar({
 	onSearch,
 	onOrderClick,
 	pending = false,
-	placeholder = "Açıklama ara…",
+	placeholder = "Search captions…",
 	className,
+	inputRef,
+	onCollapse,
 }: SearchBarProps) {
 	const handleKeyDown = useCallback(
 		(e: React.KeyboardEvent) => {
@@ -41,9 +45,22 @@ export function SearchBar({
 				className,
 			)}
 		>
+			{onCollapse && (
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon"
+					onClick={onCollapse}
+					className="shrink-0 rounded-lg h-10 w-10 touch-manipulation"
+					aria-label="Close search"
+				>
+					<ChevronDown className="size-5" />
+				</Button>
+			)}
 			<div className="relative flex-1 min-w-0">
 				<Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none shrink-0" />
 				<Input
+					ref={inputRef}
 					type="text"
 					value={value}
 					onChange={(e) => onChange(e.target.value)}
@@ -55,14 +72,14 @@ export function SearchBar({
 						"transition-all duration-200 placeholder:text-muted-foreground/80",
 						value.length > 0 ? "pr-12" : "pr-3",
 					)}
-					aria-label="Arama"
+					aria-label="Search"
 				/>
 				{value.length > 0 && (
 					<button
 						type="button"
 						onClick={() => onChange("")}
 						className="absolute right-0 top-1/2 -translate-y-1/2 w-11 h-11 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/80 touch-manipulation"
-						aria-label="Temizle"
+						aria-label="Clear"
 					>
 						<X className="size-5" />
 					</button>
@@ -74,11 +91,11 @@ export function SearchBar({
 					variant="outline"
 					size="icon"
 					onClick={onOrderClick}
-					className="hidden md:flex shrink-0 rounded-xl h-12 w-12 border-border/80"
-					title="Sıralama"
-					aria-label="Sıralama"
+					className="flex shrink-0 h-10 w-10 rounded-lg border-border/80 touch-manipulation"
+					title="Sort"
+					aria-label="Sort"
 				>
-					<ArrowUpDown className="size-5" />
+					<ArrowUpDown className="size-4" />
 				</Button>
 			)}
 			<Button
@@ -90,7 +107,7 @@ export function SearchBar({
 				{pending ? (
 					<Loader2 className="size-4 animate-spin" aria-hidden />
 				) : (
-					"Ara"
+					"Search"
 				)}
 			</Button>
 		</div>

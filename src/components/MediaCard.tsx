@@ -1,12 +1,20 @@
 "use client"
 
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+} from "@/components/ui/dialog"
 import { usePlayingVideo } from "@/contexts/PlayingVideoContext"
+import { useReelsScrollRoot } from "@/contexts/ReelsScrollRootContext"
 import { useInView } from "@/hooks/useInView"
+import { proxiedImageUrl } from "@/lib/media-url"
 import type { MediaItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { Calendar, ExternalLink, Heart } from "lucide-react"
-import { useEffect, useRef } from "react"
+import { Calendar, ExternalLink, Heart, User } from "lucide-react"
+import { useEffect, useRef, useState, type CSSProperties } from "react"
 
 interface MediaCardProps {
 	item: MediaItem
@@ -22,26 +30,96 @@ function formatDate(dateStr: string): string {
 	if (!dateStr?.trim()) return "—"
 	const d = new Date(dateStr.replace(" ", "T"))
 	if (Number.isNaN(d.getTime())) return dateStr
-	return d.toLocaleDateString("tr-TR", {
+	return d.toLocaleDateString("en-US", {
 		day: "numeric",
 		month: "short",
 		year: "numeric",
 	})
 }
 
-const mediaPlaceholderClass =
-	"aspect-[9/16] w-full rounded-lg object-cover bg-muted"
+function aspectRatioStyle(
+	w: number | undefined,
+	h: number | undefined,
+): CSSProperties {
+	if (w && h && w > 0 && h > 0) {
+		return { aspectRatio: `${w} / ${h}` }
+	}
+	return { aspectRatio: "9 / 16" }
+}
+
+const mediaFrameClass =
+	"relative w-full min-h-0 overflow-hidden rounded-lg bg-black"
+
+const mediaFitClass =
+	"absolute inset-0 h-full w-full object-contain object-center"
+
+function shouldIgnoreCardClick(target: EventTarget | null): boolean {
+	if (!(target instanceof HTMLElement)) return false
+	return Boolean(
+		target.closest("a[href]") ||
+			target.closest("video") ||
+			target.closest("button") ||
+			target.closest('[role="slider"]'),
+	)
+}
 
 export function MediaCard({ item, className }: MediaCardProps) {
-	const snippet = truncate(item.description || "Açıklama yok", 100)
+	const snippet = truncate(item.description || "No description", 100)
 	const hasVideo = Boolean(item.video_url?.trim())
-	const { ref, inView } = useInView({ rootMargin: "200px" })
+	const rawThumb = item.display_url?.trim() || ""
+	const proxiedThumb = proxiedImageUrl(rawThumb)
+	const posterAttr = proxiedThumb ?? (rawThumb || undefined)
+	const [imgSrc, setImgSrc] = useState(
+		() => (proxiedThumb ?? rawThumb) || "",
+	)
+
+	const [videoDims, setVideoDims] = useState<{
+		width: number
+		height: number
+	} | null>(null)
+
+	const [detailOpen, setDetailOpen] = useState(false)
+
+	const frameW = videoDims?.width ?? item.width
+	const frameH = videoDims?.height ?? item.height
+	const frameStyle = aspectRatioStyle(frameW, frameH)
+
+	useEffect(() => {
+		const p = proxiedImageUrl(rawThumb)
+		setImgSrc((p ?? rawThumb) || "")
+	}, [rawThumb])
+
+	const reelsScrollRoot = useReelsScrollRoot()
+	const { ref, inView } = useInView({
+		root: reelsScrollRoot,
+		rootMargin: "320px 0px",
+	})
+	/** Stays true after first in-view; avoids flicker at the visibility boundary */
+	const [mediaRevealed, setMediaRevealed] = useState(false)
+	useEffect(() => {
+		if (inView) setMediaRevealed(true)
+	}, [inView])
+
 	const videoRef = useRef<HTMLVideoElement>(null)
+	const modalVideoRef = useRef<HTMLVideoElement>(null)
 	const { playingId, setPlayingId } = usePlayingVideo()
 
 	useEffect(() => {
-		if (playingId !== null && playingId !== item.id && videoRef.current && !videoRef.current.paused) {
+		if (
+			playingId !== null &&
+			playingId !== item.id &&
+			videoRef.current &&
+			!videoRef.current.paused
+		) {
 			videoRef.current.pause()
+		}
+		if (
+			playingId !== null &&
+			playingId !== item.id &&
+			modalVideoRef.current &&
+			!modalVideoRef.current.paused
+		) {
+			modalVideoRef.current.pause()
 		}
 	}, [playingId, item.id])
 
@@ -52,115 +130,277 @@ export function MediaCard({ item, className }: MediaCardProps) {
 		}
 	}, [inView, hasVideo, playingId, item.id, setPlayingId])
 
+	useEffect(() => {
+		if (detailOpen) {
+			videoRef.current?.pause()
+		} else {
+			modalVideoRef.current?.pause()
+			if (playingId === item.id) setPlayingId(null)
+		}
+	}, [detailOpen, playingId, item.id, setPlayingId])
+
+	const handleDetailOpenChange = (open: boolean) => {
+		setDetailOpen(open)
+		if (!open) {
+			modalVideoRef.current?.pause()
+			if (playingId === item.id) setPlayingId(null)
+		}
+	}
+
+	const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+		if (shouldIgnoreCardClick(e.target)) return
+		setDetailOpen(true)
+	}
+
+	const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+		if (e.key !== "Enter" && e.key !== " ") return
+		if (shouldIgnoreCardClick(e.target)) return
+		e.preventDefault()
+		setDetailOpen(true)
+	}
+
+	const videoWidthAttr =
+		item.width && item.width > 0 ? Math.round(item.width) : undefined
+	const videoHeightAttr =
+		item.height && item.height > 0 ? Math.round(item.height) : undefined
+
+	const fullDescription =
+		item.description?.trim() || "No description."
+
 	return (
-		<Card
-			className={cn(
-				"min-h-0 w-full overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md py-0 gap-3",
-				className,
-			)}
-		>
-			<CardContent className="min-h-0 p-0" ref={ref}>
-				{!inView ? (
-					<div
-						className={cn(
-							mediaPlaceholderClass,
-							"flex items-center justify-center",
-						)}
-					>
-						<span className="text-muted-foreground text-xs">Yükleniyor…</span>
-					</div>
-				) : hasVideo ? (
-					<video
-						ref={videoRef}
-						src={item.video_url}
-						poster={item.display_url || undefined}
-						controls
-						preload="metadata"
-						playsInline
-						className={cn(mediaPlaceholderClass, "object-cover")}
-						onPlay={() => setPlayingId(item.id)}
-						onPause={() => {
-							if (playingId === item.id) setPlayingId(null)
-						}}
-					>
-						Tarayıcınız video etiketini desteklemiyor.
-					</video>
-				) : item.display_url ? (
-					<a
-						href={item.post_url}
-						target="_blank"
-						rel="noopener noreferrer"
-						className="block"
-					>
-						{/* eslint-disable-next-line @next/next/no-img-element -- external Instagram CDN */}
-						<img
-							src={item.display_url}
-							alt=""
-							className={cn(mediaPlaceholderClass, "object-cover")}
-							loading="lazy"
-						/>
-					</a>
-				) : (
-					<a
-						href={item.post_url}
-						target="_blank"
-						rel="noopener noreferrer"
-						className="block"
-					>
+		<>
+			<Card
+				tabIndex={0}
+				aria-haspopup="dialog"
+				aria-expanded={detailOpen}
+				aria-label={`@${item.username} post — click or press Enter for details`}
+				onClick={handleCardClick}
+				onKeyDown={handleCardKeyDown}
+				className={cn(
+					"box-border h-auto min-h-0 w-full max-w-full cursor-pointer overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm outline-none md:hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-0 gap-3 [contain:layout]",
+					className,
+				)}
+			>
+				<CardContent className="min-h-0 p-0" ref={ref}>
+					{!mediaRevealed ? (
 						<div
 							className={cn(
-								mediaPlaceholderClass,
+								mediaFrameClass,
+								"flex items-center justify-center",
+							)}
+							style={aspectRatioStyle(item.width, item.height)}
+						>
+							<span className="text-muted-foreground text-xs">
+								Loading…
+							</span>
+						</div>
+					) : hasVideo ? (
+						<div className={mediaFrameClass} style={frameStyle}>
+							<video
+								ref={videoRef}
+								className={cn(mediaFitClass, "reel-grid-video")}
+								src={item.video_url}
+								poster={posterAttr}
+								width={videoWidthAttr}
+								height={videoHeightAttr}
+								controls
+								preload="metadata"
+								playsInline
+								onLoadedMetadata={(e) => {
+									const v = e.currentTarget
+									const hasItemDims =
+										item.width &&
+										item.height &&
+										item.width > 0 &&
+										item.height > 0
+									if (
+										!hasItemDims &&
+										v.videoWidth > 0 &&
+										v.videoHeight > 0
+									) {
+										setVideoDims({
+											width: v.videoWidth,
+											height: v.videoHeight,
+										})
+									}
+								}}
+								onPlay={() => setPlayingId(item.id)}
+								onPause={() => {
+									if (playingId === item.id) setPlayingId(null)
+								}}
+							>
+								Your browser does not support the video tag.
+							</video>
+						</div>
+					) : rawThumb ? (
+						<div
+							className={cn(mediaFrameClass, "block")}
+							style={aspectRatioStyle(item.width, item.height)}
+						>
+							{/* eslint-disable-next-line @next/next/no-img-element -- proxy / external CDN */}
+							<img
+								src={imgSrc || rawThumb}
+								alt=""
+								className={mediaFitClass}
+								loading="lazy"
+								referrerPolicy="no-referrer"
+								onError={() => {
+									if (imgSrc && rawThumb && imgSrc !== rawThumb) {
+										setImgSrc(rawThumb)
+									}
+								}}
+							/>
+						</div>
+					) : (
+						<div
+							className={cn(
+								mediaFrameClass,
 								"flex items-center justify-center text-muted-foreground text-xs",
 							)}
+							style={aspectRatioStyle(item.width, item.height)}
 						>
 							Video
 						</div>
-					</a>
-				)}
-			</CardContent>
+					)}
+				</CardContent>
 
-			<CardFooter className="flex flex-col items-stretch gap-2 px-3 py-2.5">
-				<div className="flex flex-wrap items-center justify-between gap-2">
-					<div className="flex items-center gap-2 text-muted-foreground">
+				<CardFooter className="flex flex-col items-stretch gap-2 px-3 py-2.5">
+					<div className="flex flex-wrap items-center gap-2 text-muted-foreground">
 						<span className="inline-flex items-center gap-1 text-xs">
 							<Calendar className="size-3.5 shrink-0" />
 							{formatDate(item.post_date)}
 						</span>
 						<span className="inline-flex items-center gap-1.5 text-xs">
 							<Heart className="size-3.5 shrink-0" strokeWidth={1.8} />
-							{item.likes > 0 ? item.likes.toLocaleString("tr-TR") : "0"}
+							{item.likes > 0 ? item.likes.toLocaleString("en-US") : "0"}
 						</span>
 					</div>
-					<a
-						href={item.post_url}
-						target="_blank"
-						rel="noopener noreferrer"
-						className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-						title={"Gönderiyi Instagram\u2019da aç"}
-					>
-						<ExternalLink className="size-3.5" />
-						{"Instagram\u2019da aç"}
-					</a>
-				</div>
-				<p className="line-clamp-2 text-xs text-muted-foreground">{snippet}</p>
-				{item.tags.length > 0 && (
-					<div className="flex flex-wrap gap-1">
-						{item.tags.slice(0, 4).map((tag) => (
-							<span
-								key={tag}
-								className="rounded bg-muted/80 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+					<p className="line-clamp-2 text-left text-xs text-muted-foreground">
+						{snippet}
+					</p>
+					{item.tags.length > 0 && (
+						<div className="flex flex-wrap gap-1">
+							{item.tags.slice(0, 4).map((tag) => (
+								<span
+									key={tag}
+									className="rounded bg-muted/80 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+								>
+									{tag}
+								</span>
+							))}
+							{item.tags.length > 4 && (
+								<span className="text-[10px] text-muted-foreground">
+									+{item.tags.length - 4}
+								</span>
+							)}
+						</div>
+					)}
+				</CardFooter>
+			</Card>
+
+			<Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
+				<DialogContent
+					showCloseButton
+					className="flex max-h-[min(92vh,900px)] w-[min(96vw,960px)] max-w-[min(96vw,960px)] flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-[min(96vw,960px)]"
+				>
+					<DialogTitle className="sr-only">
+						@{item.username} — {truncate(fullDescription, 80)}
+					</DialogTitle>
+					<DialogDescription className="sr-only">
+						{fullDescription}
+					</DialogDescription>
+
+					<div className="flex min-h-0 flex-1 flex-col md:flex-row md:max-h-[min(88vh,860px)]">
+						<div className="flex min-h-[200px] flex-1 items-center justify-center bg-black md:min-h-0 md:max-w-[min(48%,420px)]">
+							{hasVideo ? (
+								<video
+									ref={modalVideoRef}
+									className="reel-grid-video max-h-[min(50vh,720px)] w-full max-w-full object-contain md:max-h-[min(82vh,800px)]"
+									src={item.video_url}
+									poster={posterAttr}
+									width={videoWidthAttr}
+									height={videoHeightAttr}
+									controls
+									preload="metadata"
+									playsInline
+									onPlay={() => setPlayingId(item.id)}
+									onPause={() => {
+										if (playingId === item.id) setPlayingId(null)
+									}}
+								>
+									Your browser does not support the video tag.
+								</video>
+							) : rawThumb ? (
+								// eslint-disable-next-line @next/next/no-img-element -- proxy / external CDN
+								<img
+									src={imgSrc || rawThumb}
+									alt=""
+									className="max-h-[min(50vh,720px)] w-full max-w-full object-contain md:max-h-[min(82vh,800px)]"
+									referrerPolicy="no-referrer"
+								/>
+							) : null}
+						</div>
+
+						<div className="flex max-h-[42vh] min-h-0 w-full flex-col gap-3 overflow-y-auto border-t border-border p-4 md:max-h-none md:w-[min(100%,400px)] md:shrink-0 md:border-t-0 md:border-l">
+							<div className="flex items-start gap-2">
+								<User
+									className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+									aria-hidden
+								/>
+								<div className="min-w-0">
+									<p className="font-semibold leading-tight">
+										{item.fullname || item.username}
+									</p>
+									<p className="text-sm text-muted-foreground">
+										@{item.username}
+									</p>
+								</div>
+							</div>
+
+							<p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+								{fullDescription}
+							</p>
+
+							{item.tags.length > 0 && (
+								<div className="flex flex-wrap gap-1.5">
+									{item.tags.map((tag) => (
+										<span
+											key={tag}
+											className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
+										>
+											#{tag}
+										</span>
+									))}
+								</div>
+							)}
+
+							<div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+								<span className="inline-flex items-center gap-1.5">
+									<Calendar className="size-4 shrink-0" />
+									{formatDate(item.post_date)}
+								</span>
+								<span className="inline-flex items-center gap-1.5">
+									<Heart className="size-4 shrink-0" strokeWidth={1.8} />
+									{item.likes > 0
+										? item.likes.toLocaleString("en-US")
+										: "0"}{" "}
+									likes
+								</span>
+							</div>
+
+							<a
+								href={item.post_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
 							>
-								{tag}
-							</span>
-						))}
-						{item.tags.length > 4 && (
-							<span className="text-[10px] text-muted-foreground">
-								+{item.tags.length - 4}
-							</span>
-						)}
+								<ExternalLink className="size-4" />
+								Open on Instagram
+							</a>
+						</div>
 					</div>
-				)}
-			</CardFooter>
-		</Card>
+				</DialogContent>
+			</Dialog>
+		</>
 	)
 }

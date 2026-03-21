@@ -36,7 +36,7 @@ let items: MediaItem[] = []
 let idToItem: Map<string, MediaItem> = new Map()
 let fuse: Fuse<SearchDoc> | null = null
 
-/** Yeni metadata sonrası ana sayfada taze index için */
+/** After new metadata, refresh the index on the main view */
 export function invalidateSearchIndex(): void {
 	fuse = null
 	items = []
@@ -105,6 +105,18 @@ export function search(params: SearchParams): MediaItem[] {
 			normalizeForSearch(i.username).includes(u),
 		)
 	}
+	if (params.usernames && params.usernames.length > 0) {
+		const set = new Set(
+			params.usernames
+				.map((u) => normalizeForSearch(u.trim()))
+				.filter(Boolean),
+		)
+		if (set.size > 0) {
+			filtered = filtered.filter((i) =>
+				set.has(normalizeForSearch(i.username)),
+			)
+		}
+	}
 	if (params.category?.trim()) {
 		const c = normalizeForSearch(params.category.trim())
 		filtered = filtered.filter(
@@ -137,6 +149,21 @@ export function getFilterOptions(): {
 	const categories = [...new Set(items.map((i) => i.category).filter(Boolean))].sort()
 	const types = [...new Set(items.map((i) => i.type).filter(Boolean))].sort()
 	return { usernames, categories, types }
+}
+
+/** Distinct usernames with at least one post in this category in the index */
+export function getUsernamesInCategory(category: string): string[] {
+	const c = category?.trim()
+	if (!c || items.length === 0) return []
+	const norm = normalizeForSearch(c)
+	const set = new Set<string>()
+	for (const i of items) {
+		if (normalizeForSearch(i.category) === norm && i.username)
+			set.add(i.username)
+	}
+	return [...set].sort((a, b) =>
+		a.localeCompare(b, LOCALE, { sensitivity: "base" }),
+	)
 }
 
 export function isIndexLoaded(): boolean {

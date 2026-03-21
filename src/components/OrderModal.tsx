@@ -6,11 +6,11 @@ import { cn } from "@/lib/utils"
 import type { SortOption } from "@/lib/types"
 
 const SORT_OPTIONS: { value: SortOption; label: string; icon: typeof Calendar }[] = [
-	{ value: "relevance", label: "Varsayılan (arama sırası)", icon: ListOrdered },
-	{ value: "date_desc", label: "Tarih (yeni → eski)", icon: Calendar },
-	{ value: "date_asc", label: "Tarih (eski → yeni)", icon: Calendar },
-	{ value: "likes_desc", label: "Beğeni (çok → az)", icon: Heart },
-	{ value: "likes_asc", label: "Beğeni (az → çok)", icon: Heart },
+	{ value: "relevance", label: "Default (search order)", icon: ListOrdered },
+	{ value: "date_desc", label: "Date (newest first)", icon: Calendar },
+	{ value: "date_asc", label: "Date (oldest first)", icon: Calendar },
+	{ value: "likes_desc", label: "Likes (high → low)", icon: Heart },
+	{ value: "likes_asc", label: "Likes (low → high)", icon: Heart },
 ]
 
 interface OrderModalProps {
@@ -50,7 +50,7 @@ export function OrderModal({ open, onClose, value, onChange }: OrderModalProps) 
 			/>
 			<div className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-4 shadow-xl">
 				<h2 id="order-modal-title" className="mb-3 text-sm font-semibold text-foreground">
-					Sıralama
+					Sort
 				</h2>
 				<ul className="flex flex-col gap-0.5">
 					{SORT_OPTIONS.map((opt) => {

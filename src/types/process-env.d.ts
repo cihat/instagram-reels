@@ -2,7 +2,7 @@
 declare namespace NodeJS {
 	interface ProcessEnv {
 		FETCH_TRIGGER_SECRET?: string
-		/** Tarayıcı Cookie başlığı (sessionid, csrftoken, …) */
+		/** Browser-style Cookie header (sessionid, csrftoken, …) */
 		INSTAGRAM_COOKIES?: string
 	}
 }

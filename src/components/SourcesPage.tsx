@@ -2,207 +2,217 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useCallback, useEffect, useState } from "react"
-import { ArrowLeft, Loader2 } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { invalidateSearchIndex } from "@/lib/search"
+import {
+	ArrowLeft,
+	Clapperboard,
+	Cookie,
+	ExternalLink,
+	Github,
+	ListOrdered,
+	Shield,
+	Users,
+} from "lucide-react"
+import { ShellHeader } from "@/components/ShellHeader"
+import { SourcesForm } from "@/components/SourcesForm"
+import { Button, buttonVariants } from "@/components/ui/button"
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 
-const STORAGE_ACCOUNTS = "reels-sources-accounts"
-const STORAGE_SECRET = "reels-sources-trigger-secret"
+const REPO_URL = "https://github.com/cihat/instagram-reels"
 
 export function SourcesPage() {
 	const router = useRouter()
-	const [accountsText, setAccountsText] = useState("")
-	const [secret, setSecret] = useState("")
-	const [loading, setLoading] = useState(false)
-	const [message, setMessage] = useState<string | null>(null)
-	const [error, setError] = useState<string | null>(null)
 
-	useEffect(() => {
-		try {
-			const a = localStorage.getItem(STORAGE_ACCOUNTS)
-			if (a) setAccountsText(a)
-			const s = localStorage.getItem(STORAGE_SECRET)
-			if (s) setSecret(s)
-		} catch {
-			// ignore
-		}
-	}, [])
-
-	const persist = useCallback(() => {
-		try {
-			localStorage.setItem(STORAGE_ACCOUNTS, accountsText)
-			localStorage.setItem(STORAGE_SECRET, secret)
-		} catch {
-			// ignore
-		}
-	}, [accountsText, secret])
-
-	const handleSubmit = async (e: React.FormEvent) => {
-		e.preventDefault()
-		setError(null)
-		setMessage(null)
-		persist()
-
-		const accounts = accountsText
-			.split(/[\n,]+/)
-			.map((s) => s.trim().replace(/^@+/, ""))
-			.filter(Boolean)
-
-		if (accounts.length === 0) {
-			setError("En az bir kullanıcı adı yazın (satır başına bir veya virgülle ayırın).")
-			return
-		}
-
-		setLoading(true)
-		try {
-			const res = await fetch("/api/fetch-metadata", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({
-					secret: secret.trim() || undefined,
-					accounts,
-				}),
-			})
-			const data = (await res.json()) as {
-				ok?: boolean
-				message?: string
-				error?: string
-				detail?: string
-				warnings?: string[]
-				persisted?: boolean
-			}
-
-			if (!res.ok) {
-				setError(
-					[data.error, data.detail].filter(Boolean).join(": ") || "İstek başarısız",
-				)
-				return
-			}
-			const warnText =
-				data.warnings?.filter(Boolean).join("\n") ?? ""
-			const persistNote = data.persisted === false
-				? "\n\nNot: R2’ye yazılamadı — üretimde Wrangler’da REELS_BUCKET bağlayın."
-				: ""
-			const body = [data.message, warnText ? `Uyarılar:\n${warnText}` : "", persistNote]
-				.filter(Boolean)
-				.join("\n\n")
-
-			if (data.ok === false) {
-				setError(body || "Çekim başarısız")
-				return
-			}
-			invalidateSearchIndex()
-			router.push("/")
-		} catch {
-			setError("Ağ hatası — tekrar deneyin.")
-		} finally {
-			setLoading(false)
-		}
-	}
+	const headerActions = (
+		<a
+			href={REPO_URL}
+			target="_blank"
+			rel="noopener noreferrer"
+			className={cn(
+				buttonVariants({ variant: "outline", size: "icon-sm" }),
+				"no-underline",
+			)}
+			aria-label="Project on GitHub"
+			title="GitHub"
+		>
+			<Github className="size-4" />
+		</a>
+	)
 
 	return (
-		<div className="min-h-screen bg-background text-foreground">
-			<header className="sticky top-0 z-10 border-b border-border/80 bg-background/95 backdrop-blur-sm px-4 py-3">
-				<div className="mx-auto flex max-w-lg items-center gap-3">
-					<Button variant="ghost" size="icon-sm" asChild className="shrink-0">
-						<Link href="/" aria-label="Videolara dön">
-							<ArrowLeft className="size-5" />
-						</Link>
-					</Button>
-					<h1 className="text-sm font-semibold tracking-tight">
-						Kaynak hesaplar
-					</h1>
+		<div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
+			<ShellHeader title="Source accounts" actions={headerActions} />
+
+			<main className="mx-auto w-full max-w-6xl min-h-0 flex-1 overflow-y-auto px-4 py-8 pb-16 sm:px-6 lg:px-10">
+				<div className="grid gap-10 lg:grid-cols-12 lg:gap-12 lg:items-start">
+					<div className="space-y-6 lg:col-span-5">
+						<div className="space-y-3">
+							<p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+								Setup
+							</p>
+							<h2 className="text-balance text-2xl font-semibold tracking-tight sm:text-[1.65rem]">
+								Choose who appears in your reels grid
+							</h2>
+							<p className="max-w-prose text-pretty text-[15px] leading-relaxed text-muted-foreground">
+								This screen exists because the app only searches reels from
+								accounts you explicitly list. Nothing is inferred from your
+								personal Instagram login — you curate the index yourself, then
+								trigger a metadata fetch so thumbnails and titles can show up in
+								search.
+							</p>
+						</div>
+
+						<Card className="border-border/80 shadow-sm">
+							<CardHeader className="pb-3">
+								<CardTitle className="flex items-center gap-2 text-base">
+									<Users className="size-4 shrink-0 text-primary" aria-hidden />
+									What you configure
+								</CardTitle>
+								<CardDescription className="text-pretty leading-relaxed">
+									<strong className="font-medium text-foreground">
+										Accounts
+									</strong>{" "}
+									are merged into one list (stored in your browser) and define
+									which profiles the grid can include.
+								</CardDescription>
+							</CardHeader>
+						</Card>
+
+						<Card className="border-border/80 shadow-sm">
+							<CardHeader className="pb-3">
+								<CardTitle className="flex items-center gap-2 text-base">
+									<ListOrdered
+										className="size-4 shrink-0 text-primary"
+										aria-hidden
+									/>
+									How it works
+								</CardTitle>
+							</CardHeader>
+							<CardContent className="space-y-3 pt-0 text-sm leading-relaxed text-muted-foreground">
+								<ol className="list-decimal space-y-2.5 pl-5 marker:font-medium marker:text-foreground">
+									<li>
+										Add usernames (with or without @). Confirm with Enter or a
+										comma; you can paste several at once.
+									</li>
+									<li>
+										Provide{" "}
+										<strong className="font-medium text-foreground">
+											access
+										</strong>
+										: your deploy password{" "}
+										<span className="text-foreground">or</span> Instagram
+										session cookies so the server can request public metadata the
+										same way a logged-in browser would.
+									</li>
+									<li>
+										Click{" "}
+										<strong className="font-medium text-foreground">
+											Fetch Reels metadata
+										</strong>
+										. That refreshes what the search index knows about those
+										accounts.
+									</li>
+								</ol>
+							</CardContent>
+						</Card>
+
+						<Card className="border-border/80 shadow-sm">
+							<CardHeader className="pb-3">
+								<CardTitle className="flex items-center gap-2 text-base">
+									<Cookie className="size-4 shrink-0 text-primary" aria-hidden />
+									Instagram access
+								</CardTitle>
+								<CardDescription className="text-pretty leading-relaxed">
+									The secret field accepts your host&apos;s password, or values
+									like{" "}
+									<code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+										sessionid
+									</code>{" "}
+									and{" "}
+									<code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+										csrftoken
+									</code>
+									. Step-by-step browser copy instructions live inside the form
+									panel — expand &quot;Browser cookie steps&quot; when you need
+									them.
+								</CardDescription>
+							</CardHeader>
+						</Card>
+
+						<Card className="border-border/80 bg-muted/20 shadow-none">
+							<CardHeader className="pb-3">
+								<CardTitle className="flex items-center gap-2 text-base">
+									<Shield className="size-4 shrink-0 text-primary" aria-hidden />
+									Privacy
+								</CardTitle>
+								<CardDescription className="text-pretty leading-relaxed">
+									Treat cookies like a password. They travel only with your own
+									fetch requests to this app; nothing here is a black box — the
+									project is open source.
+								</CardDescription>
+							</CardHeader>
+							<CardContent className="pt-0">
+								<a
+									href={REPO_URL}
+									target="_blank"
+									rel="noopener noreferrer"
+									className={cn(
+										buttonVariants({ variant: "outline", size: "sm" }),
+										"inline-flex gap-2 no-underline",
+									)}
+								>
+									<Github className="size-4" aria-hidden />
+									View source on GitHub
+									<ExternalLink className="size-3.5 opacity-70" aria-hidden />
+								</a>
+							</CardContent>
+						</Card>
+					</div>
+
+					<div className="space-y-6 lg:col-span-7">
+						<Card className="border-border/80 shadow-md">
+							<CardHeader className="gap-1 border-b border-border/60 pb-4">
+								<CardTitle className="text-lg tracking-tight">
+									Your accounts &amp; access
+								</CardTitle>
+								<CardDescription>
+									Edit the list and secret below, then fetch. Settings persist in
+									this browser until you change them.
+								</CardDescription>
+							</CardHeader>
+							<CardContent className="space-y-6 pt-6">
+								<SourcesForm onSuccess={() => router.push("/reels")} />
+							</CardContent>
+						</Card>
+
+						<div className="flex flex-col items-stretch gap-2 sm:flex-row sm:justify-end">
+							<Button
+								type="button"
+								variant="secondary"
+								className="gap-2"
+								onClick={() => router.push("/reels")}
+							>
+								<Clapperboard className="size-4" aria-hidden />
+								Back to reels
+							</Button>
+							<Button
+								variant="outline"
+								className="gap-2"
+								nativeButton={false}
+								render={<Link href="/" prefetch={false} />}
+							>
+								<ArrowLeft className="size-4" aria-hidden />
+								Home
+							</Button>
+						</div>
+					</div>
 				</div>
-			</header>
-
-			<main className="mx-auto max-w-lg px-4 py-6 pb-12">
-				<p className="mb-4 text-sm text-muted-foreground leading-relaxed">
-					Takip etmek istediğiniz Instagram kullanıcı adlarını girin (@ olmadan). Bu sayfada video
-					yok; sunucu Instagram’a doğrudan istek atar, gelen verileri indekse ekler (R2
-					bağlıysa <code className="rounded bg-muted px-1 text-[11px]">index.json</code> güncellenir).
-				</p>
-
-				<form onSubmit={handleSubmit} className="flex flex-col gap-4">
-					<div>
-						<label
-							htmlFor="accounts"
-							className="mb-1.5 block text-xs font-medium text-foreground"
-						>
-							Hesaplar
-						</label>
-						<textarea
-							id="accounts"
-							value={accountsText}
-							onChange={(e) => setAccountsText(e.target.value)}
-							rows={8}
-							placeholder={"axiomism\nbaska_hesap"}
-							className={cn(
-								"w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm",
-								"shadow-xs outline-none placeholder:text-muted-foreground",
-								"focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
-								"dark:bg-input/30",
-							)}
-							autoComplete="off"
-							spellCheck={false}
-						/>
-						<p className="mt-1 text-xs text-muted-foreground">
-							Satır başına bir ad veya virgülle ayırın.
-						</p>
-					</div>
-
-					<div>
-						<label
-							htmlFor="trigger-secret"
-							className="mb-1.5 block text-xs font-medium text-foreground"
-						>
-							Tetikleme anahtarı
-						</label>
-						<Input
-							id="trigger-secret"
-							type="password"
-							value={secret}
-							onChange={(e) => setSecret(e.target.value)}
-							placeholder="Cloudflare / .env ile aynı FETCH_TRIGGER_SECRET"
-							autoComplete="off"
-						/>
-						<p className="mt-1 text-xs text-muted-foreground">
-							Üretimde sunucuda{" "}
-							<code className="rounded bg-muted px-1 py-0.5 text-[11px]">FETCH_TRIGGER_SECRET</code>{" "}
-							tanımlayın ve buraya aynı değeri girin. Tanımlı değilse yalnızca yerel denemede
-							anahtarsız kabul edilir. Asıl oturum için{" "}
-							<code className="rounded bg-muted px-1 py-0.5 text-[11px]">INSTAGRAM_COOKIES</code>{" "}
-							(secret) gerekir — tarayıcıda giriş yaptıktan sonra istek başlığındaki{" "}
-							<code className="rounded bg-muted px-1 py-0.5 text-[11px]">Cookie</code> değerini
-							kopyalayın.
-						</p>
-					</div>
-
-					<Button type="submit" disabled={loading} className="w-full sm:w-auto">
-						{loading ? (
-							<>
-								<Loader2 className="size-4 animate-spin" aria-hidden />
-								Gönderiliyor…
-							</>
-						) : (
-							"Reels metadata çek"
-						)}
-					</Button>
-				</form>
-
-				{error && (
-					<p
-						className="mt-4 text-sm text-destructive"
-						role="alert"
-					>
-						{error}
-					</p>
-				)}
-				{message && (
-					<p className="mt-4 text-sm text-muted-foreground">{message}</p>
-				)}
 			</main>
 		</div>
 	)
