@@ -4,7 +4,7 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "reels-search-next",
+	"name": "instagram-reels",
 	"main": ".open-next/worker.js",
 	"compatibility_date": "2026-03-17",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
@@ -18,14 +18,12 @@
 	"services": [
 		{
 			"binding": "WORKER_SELF_REFERENCE",
-			"service": "reels-search-next"
+			"service": "instagram-reels"
 		}
 	],
+	// Cloudflare Dashboard → R2: create a bucket, then set `bucket_name` below to match (default: reels-search-data).
 	"r2_buckets": [
-		{
-			"binding": "REELS_BUCKET",
-			"bucket_name": "reels-search-data"
-		}
+		{ "binding": "REELS_BUCKET", "bucket_name": "reels-search-data" }
 	],
 	"observability": {
 		"enabled": true
