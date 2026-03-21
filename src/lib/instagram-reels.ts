@@ -1,3 +1,4 @@
+import { humanizeInstagramFetchDetail } from "@/lib/instagram-user-messages"
 import type { MediaItem } from "@/lib/types"
 
 const UA =
@@ -566,13 +567,13 @@ export async function fetchReelsForUser(
 				for (const it of fromClips) pushItem(it)
 			} catch (e) {
 				warnings.push(
-					`${username} clips API: ${formatFetchError(e)}`,
+					`${username}: ${humanizeInstagramFetchDetail(formatFetchError(e))}`,
 				)
 			}
 		}
 	} catch (e) {
 		warnings.push(
-			`${username} web_profile_info: ${formatFetchError(e)}`,
+			`${username}: ${humanizeInstagramFetchDetail(formatFetchError(e))}`,
 		)
 	}
 
@@ -598,15 +599,19 @@ export async function fetchReelsForUser(
 				"https://www.instagram.com/",
 			)
 			warnings.push(
-				`${username}: could not open /reels/ (${detail}); tried profile page.`,
+				`${username}: Reels page failed (${humanizeInstagramFetchDetail(detail)}); used profile instead.`,
 			)
 		} catch (e2) {
+			const h1 = humanizeInstagramFetchDetail(detail)
+			const h2 = humanizeInstagramFetchDetail(formatFetchError(e2))
 			warnings.push(
-				`${username}: could not load list — ${detail} | profile: ${formatFetchError(e2)}`,
+				h1 === h2
+					? `${username}: ${h1}`
+					: `${username}: ${h1} ${h2}`,
 			)
 			if (isLikelyEdgeBlockMessage(detail) || isLikelyEdgeBlockMessage(formatFetchError(e2))) {
 				warnings.push(
-					"Instagram may be blocking the server egress IP (common on Cloudflare Workers). Try `npm run dev` locally with the same INSTAGRAM_COOKIES, or use gallery-dl / GitHub Actions for metadata.",
+					"Instagram may be blocking this server’s network. Try running the app locally with the same cookies, or fetch metadata another way.",
 				)
 			}
 			return { items, warnings }
@@ -614,7 +619,7 @@ export async function fetchReelsForUser(
 	}
 
 	if (!html) {
-		warnings.push(`${username}: empty response`)
+		warnings.push(`${username}: Empty response from Instagram.`)
 		return { items, warnings }
 	}
 
@@ -631,6 +636,8 @@ export async function fetchReelsForUser(
 			MAX_INDIVIDUAL_REEL_HTML_FETCHES,
 		)
 		const codes = shortcodesFromHtml(html, Math.max(0, shortcodeBudget))
+		let reelPageFailures = 0
+		let lastReelFailureHuman = ""
 		for (const code of codes) {
 			if (seenShort.has(code)) continue
 			try {
@@ -650,17 +657,25 @@ export async function fetchReelsForUser(
 					}
 				}
 			} catch (e) {
-				warnings.push(
-					`${username}/${code}: ${e instanceof Error ? e.message : String(e)}`,
+				reelPageFailures++
+				lastReelFailureHuman = humanizeInstagramFetchDetail(
+					formatFetchError(e),
 				)
 			}
 			if (items.length >= cap) break
+		}
+		if (reelPageFailures > 0) {
+			warnings.push(
+				reelPageFailures === 1
+					? `${username}: ${lastReelFailureHuman}`
+					: `${username}: Could not open ${reelPageFailures} reel pages (${lastReelFailureHuman})`,
+			)
 		}
 	}
 
 	if (items.length === 0) {
 		warnings.push(
-			`${username}: no media found. Ensure sessionid and csrftoken are present in cookies; the account may be private or blocked.`,
+			`${username}: No reels found. If the account is private, check cookies (sessionid / csrftoken).`,
 		)
 	}
 

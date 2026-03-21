@@ -103,6 +103,7 @@ export function CategoryAccountsModal({
 	const persistRef = useRef(onPersistAccounts)
 	persistRef.current = onPersistAccounts
 	const initialVisibleSnapshotRef = useRef("")
+	const initialVisibleSetRef = useRef<Set<string>>(new Set())
 	const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const suppressCloseFlushRef = useRef(false)
 
@@ -138,6 +139,7 @@ export function CategoryAccountsModal({
 				(u) => !hiddenSet.has(normalizeForSearch(u)),
 			)
 			initialVisibleSnapshotRef.current = snapshotSorted(initiallyVisible)
+			initialVisibleSetRef.current = new Set(initiallyVisible)
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- open/category reset
 	}, [open, category])
@@ -179,8 +181,11 @@ export function CategoryAccountsModal({
 		persistRef.current(list, hiddenNorms)
 		const visible = visibleUsernamesFromRows(rowsRef.current)
 		const nowSnap = snapshotSorted(visible)
-		if (visible.length > 0 && nowSnap !== initialVisibleSnapshotRef.current) {
-			runMetadataFetch(visible)
+		if (nowSnap !== initialVisibleSnapshotRef.current) {
+			const newlyVisible = visible.filter(
+				(u) => !initialVisibleSetRef.current.has(u),
+			)
+			if (newlyVisible.length > 0) runMetadataFetch(newlyVisible)
 			initialVisibleSnapshotRef.current = nowSnap
 		}
 	}, [runMetadataFetch])
@@ -254,8 +259,8 @@ export function CategoryAccountsModal({
 					<DialogDescription>
 						Usernames for “{label}” (without @). Use the eye control to hide an
 						account from this category’s feed without removing it. Changes save
-						automatically; if visible accounts changed, a metadata fetch runs when
-						you close this dialog.
+						automatically; when you close, metadata is fetched only for accounts
+						newly visible in this category (e.g. added or unhidden).
 					</DialogDescription>
 				</DialogHeader>
 				<div className="max-h-[min(50vh,20rem)] space-y-2 overflow-y-auto pr-1">

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -9,6 +9,7 @@ import {
 	AudioLines,
 	Baby,
 	Bike,
+	Bookmark,
 	BookOpen,
 	Brain,
 	Briefcase,
@@ -69,6 +70,7 @@ import {
 	Zap,
 } from "lucide-react"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 import { AccountOrganizeModal } from "@/components/AccountOrganizeModal"
 import { CategoryAccountsModal } from "@/components/CategoryAccountsModal"
 import { Button } from "@/components/ui/button"
@@ -170,7 +172,19 @@ export function AppSidebar() {
 		setSourcesModalOpen,
 		addCustomCategory,
 		getCategoryLabel,
+		favoriteCategoryOrder,
+		toggleFavoriteCategory,
 	} = useCategoryFilter()
+
+	const orderedSidebarCategories = useMemo(() => {
+		const byId = new Map(sidebarCategories.map((c) => [c.id, c]))
+		const favSet = new Set(favoriteCategoryOrder)
+		const favorites = favoriteCategoryOrder
+			.filter((id) => byId.has(id))
+			.map((id) => byId.get(id)!)
+		const rest = sidebarCategories.filter((c) => !favSet.has(c.id))
+		return [...favorites, ...rest]
+	}, [sidebarCategories, favoriteCategoryOrder])
 
 	const [editOpen, setEditOpen] = useState(false)
 	const [organizeOpen, setOrganizeOpen] = useState(false)
@@ -237,12 +251,13 @@ export function AppSidebar() {
 						</SidebarGroupLabel>
 						<SidebarGroupContent>
 							<SidebarMenu>
-								{sidebarCategories.map(({ id, label }) => {
+								{orderedSidebarCategories.map(({ id, label }) => {
 									const builtinIcon = CATEGORY_ICONS[id as ReelCategoryId]
 									const Icon =
 										id === OTHER_CATEGORY_ID
 											? Layers
 											: (builtinIcon ?? FolderOpen)
+									const isFav = favoriteCategoryOrder.includes(id)
 									return (
 										<SidebarMenuItem key={id}>
 											<div className="flex w-full min-w-0 items-center gap-0.5 pr-0.5">
@@ -259,6 +274,40 @@ export function AppSidebar() {
 													<Icon />
 													<span className="truncate">{label}</span>
 												</SidebarMenuButton>
+												<Button
+													type="button"
+													variant="ghost"
+													size="icon-sm"
+													className={cn(
+														"h-8 w-8 shrink-0 group-data-[collapsible=icon]:hidden",
+														isFav
+															? "text-amber-500 hover:text-amber-600"
+															: "text-muted-foreground hover:text-foreground",
+													)}
+													onClick={(e) => {
+														e.preventDefault()
+														e.stopPropagation()
+														toggleFavoriteCategory(id)
+													}}
+													title={
+														isFav
+															? `Remove “${label}” from favorites`
+															: `Favorite “${label}” — show at top`
+													}
+													aria-pressed={isFav}
+													aria-label={
+														isFav
+															? `Remove ${label} from favorites`
+															: `Add ${label} to favorites`
+													}
+												>
+													<Bookmark
+														className={cn(
+															"size-4",
+															isFav && "fill-amber-400",
+														)}
+													/>
+												</Button>
 												<Button
 													type="button"
 													variant="ghost"

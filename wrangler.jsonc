@@ -42,11 +42,9 @@
 			"preview_id": "ee784044fb7b4e429dc4280ba4178578"
 		}
 	],
-	// Instagram HTML follows many redirects when blocked; each hop counts as a subrequest.
-	// Default (50) is easy to exceed when fetching several accounts + /reel/ pages.
-	"limits": {
-		"subrequests": 2000
-	},
+	// Do not set `limits` here on the Workers Free plan: Wrangler sends limit metadata to the API
+	// and uploads fail with 100328 ("CPU limits are not supported for the Free plan"). Raising
+	// subrequest caps is a paid-plan feature; see https://developers.cloudflare.com/workers/platform/limits/#subrequests
 	"observability": {
 		"enabled": true
 	}

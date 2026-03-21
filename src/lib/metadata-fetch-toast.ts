@@ -48,7 +48,7 @@ export function enqueueMetadataFetchToast(
 			loading: metadataLoadingMessage(accounts),
 			success: (result) =>
 				result.warnings.length > 0
-					? `Index updated — ${result.warnings.length} warning(s)`
+					? "Index updated — some accounts were skipped or limited."
 					: "Index updated",
 			error: (e) => {
 				const msg = e instanceof Error ? e.message : "Request failed"

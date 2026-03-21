@@ -1,5 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 import { instagramCookieHeaderFromUserInput } from "@/lib/instagram-cookie-input"
+import { sanitizeClientMetadataWarning } from "@/lib/instagram-user-messages"
 import { fetchReelsForUser } from "@/lib/instagram-reels"
 import { dedupeMediaItemsByReel } from "@/lib/reel-dedupe"
 import type { MediaItem } from "@/lib/types"
@@ -138,7 +139,7 @@ export async function POST(request: Request) {
 			}
 		} catch {
 			allWarnings.push(
-				"Could not read existing index.json; only new items will be written.",
+				"Could not read the saved catalog; only newly fetched items will be kept in this run.",
 			)
 		}
 	}
@@ -154,23 +155,27 @@ export async function POST(request: Request) {
 			persisted = true
 		} catch (e) {
 			allWarnings.push(
-				`R2 write failed: ${e instanceof Error ? e.message : String(e)}`,
+				"Could not save the catalog to storage. Try again or check server configuration.",
 			)
 		}
 	} else {
 		allWarnings.push(
-			"REELS_BUCKET is not bound — the index was not persisted in this environment (add R2 with OpenNext/Wrangler).",
+			"Storage is not configured here — the catalog was not saved on the server.",
 		)
 	}
 
 	const message =
 		fetched.length === 0
 			? persisted
-				? "No new items; existing index kept. Review warnings."
-				: "No new items fetched. Review warnings."
+				? "No new reels; your saved catalog is unchanged."
+				: "No new reels could be fetched."
 			: persisted
-				? "Metadata fetched and index updated. Refresh the page."
-				: "Metadata fetched; without R2 the app may still show a stale index."
+				? "Catalog updated. Refresh the page."
+				: "Reels fetched, but they were not saved — the grid may look out of date."
+
+	const clientWarnings = [
+		...new Set(allWarnings.map(sanitizeClientMetadataWarning)),
+	]
 
 	return NextResponse.json({
 		ok: fetched.length > 0,
@@ -178,7 +183,7 @@ export async function POST(request: Request) {
 		accounts,
 		fetchedCount: fetched.length,
 		mergedCount: merged.length,
-		warnings: allWarnings,
+		warnings: clientWarnings,
 		message,
 	})
 }

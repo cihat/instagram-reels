@@ -9,6 +9,10 @@ export function isSourcesSessionOrCookieError(message: string): boolean {
 	if (m.includes("instagram_cookies")) return true
 	if (m.includes("sessionid") && m.includes("csrftoken")) return true
 	if (m.includes("instagram") && m.includes("cookie")) return true
+	if (m.includes("refresh cookies")) return true
+	if (m.includes("sign-in required")) return true
+	if (m.includes("cookies may be invalid")) return true
+	if (m.includes("cookies may be expired")) return true
 	/* fetch-metadata: wrong deploy secret and no valid cookie paste */
 	if (m === "unauthorized") return true
 	return false

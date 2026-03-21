@@ -5,6 +5,8 @@ import { cn } from "@/lib/utils"
 
 interface AccountFilterBarProps {
 	usernames: string[]
+	/** Reels per username for the current category + search query (same basis as the grid). */
+	counts?: Record<string, number>
 	selected: string[]
 	onChange: (next: string[]) => void
 	className?: string
@@ -12,6 +14,7 @@ interface AccountFilterBarProps {
 
 export function AccountFilterBar({
 	usernames,
+	counts,
 	selected,
 	onChange,
 	className,
@@ -47,6 +50,9 @@ export function AccountFilterBar({
 				</Button>
 				{usernames.map((name) => {
 					const active = selected.includes(name)
+					const n = counts?.[name]
+					const title =
+						n !== undefined ? `@${name} — ${n} reels` : `@${name}`
 					return (
 						<Button
 							key={name}
@@ -55,9 +61,23 @@ export function AccountFilterBar({
 							size="sm"
 							className="h-8 shrink-0 rounded-full px-3 text-xs font-normal"
 							onClick={() => setSelected(name)}
-							title={`@${name}`}
+							title={title}
 						>
-							@{name}
+							<span className="flex items-center gap-1.5">
+								<span>@{name}</span>
+								{n !== undefined ? (
+									<span
+										className={cn(
+											"tabular-nums text-[11px]",
+											active
+												? "text-primary-foreground/85"
+												: "text-muted-foreground",
+										)}
+									>
+										{n}
+									</span>
+								) : null}
+							</span>
 						</Button>
 					)
 				})}

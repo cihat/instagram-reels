@@ -1,3 +1,38 @@
+/** Short error for forms/toasts — never append raw API `warnings[]`. */
+function userFacingMetadataFailureMessage(
+	message: string | undefined,
+	warnings: string[],
+	accountCount: number,
+	persistNote: string,
+): string {
+	const base = (message ?? "").trim() || "Could not fetch new reels."
+	if (warnings.length === 0) {
+		return persistNote ? `${base} ${persistNote}`.trim() : base
+	}
+
+	const joined = warnings.join(" ").toLowerCase()
+	let hint = ""
+	if (
+		/rate limit|redirect|cookie|session|sign-in|not allowed|401|blocked|reach instagram/i.test(
+			joined,
+		)
+	) {
+		hint =
+			accountCount > 1
+				? "Instagram rate-limited or blocked some accounts — wait a bit or update cookies."
+				: "Instagram rate-limited or blocked the request — wait a bit or update cookies."
+	} else if (
+		/storage|catalog|saved|bucket|configured|read the saved|save the catalog/i.test(joined)
+	) {
+		hint =
+			"There was a problem reading or saving the catalog on the server."
+	} else {
+		hint = "Try again in a few minutes."
+	}
+
+	return [base, hint, persistNote].filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
+}
+
 export type SourcesMetadataResult =
 	| {
 			ok: true
@@ -40,17 +75,19 @@ export async function fetchSourcesMetadata(
 		const warnText = data.warnings?.filter(Boolean) ?? []
 		const persistNote =
 			data.persisted === false
-				? "Metadata was fetched but could not be saved on the server; the grid may not update."
+				? "Fetched data could not be saved; refresh may not show changes."
 				: ""
-		const parts = [
-			data.message,
-			warnText.length ? `Warnings: ${warnText.join("; ")}` : "",
-			persistNote,
-		].filter(Boolean)
-		const detailBody = parts.join("\n\n")
 
 		if (data.ok === false) {
-			return { ok: false, error: detailBody || "Fetch failed" }
+			return {
+				ok: false,
+				error: userFacingMetadataFailureMessage(
+					data.message,
+					warnText,
+					accounts.length,
+					persistNote,
+				),
+			}
 		}
 
 		return {

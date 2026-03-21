@@ -19,6 +19,11 @@ import {
 	readStoredSelectedCategoryId,
 } from "@/lib/category-accounts-storage"
 import {
+	loadCategoryFavoriteOrder,
+	persistCategoryFavoriteOrder,
+	pruneCategoryFavoriteOrder,
+} from "@/lib/category-favorites-storage"
+import {
 	loadCustomCategories,
 	persistCustomCategories,
 	type StoredCustomCategory,
@@ -77,6 +82,9 @@ type CategoryFilterContextValue = {
 	/** Shared with Reels header / sidebar: Source accounts dialog */
 	sourcesModalOpen: boolean
 	setSourcesModalOpen: (open: boolean) => void
+	/** Category ids starred in the sidebar; order defines priority at the top */
+	favoriteCategoryOrder: string[]
+	toggleFavoriteCategory: (categoryId: string) => void
 }
 
 const CategoryFilterContext = createContext<CategoryFilterContextValue | null>(
@@ -98,6 +106,9 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 	const [hydrated, setHydrated] = useState(false)
 	const [indexEpoch, setIndexEpoch] = useState(0)
 	const [sourcesModalOpen, setSourcesModalOpen] = useState(false)
+	const [favoriteCategoryOrder, setFavoriteCategoryOrder] = useState<
+		string[]
+	>([])
 
 	const accountOverridesRef = useRef(accountOverrides)
 	accountOverridesRef.current = accountOverrides
@@ -123,6 +134,11 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 			...BUILTIN_REEL_CATEGORY_IDS,
 			...custom.map((c) => c.id),
 		])
+		const rawFav = loadCategoryFavoriteOrder()
+		const prunedFav = pruneCategoryFavoriteOrder(rawFav, allowed)
+		if (prunedFav.length !== rawFav.length)
+			persistCategoryFavoriteOrder(prunedFav)
+		setFavoriteCategoryOrder(prunedFav)
 		setAccountOverrides(loadCategoryAccountOverrides(allowed))
 		setHiddenAccountNormsByCategory(loadCategoryHiddenAccounts(allowed))
 		const raw = readStoredSelectedCategoryId()
@@ -372,6 +388,21 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 		setIndexEpoch((e) => e + 1)
 	}, [])
 
+	const toggleFavoriteCategory = useCallback((categoryId: string) => {
+		const allowed = new Set([
+			...BUILTIN_REEL_CATEGORY_IDS,
+			...customCategoriesRef.current.map((c) => c.id),
+		])
+		if (!allowed.has(categoryId)) return
+		setFavoriteCategoryOrder((prev) => {
+			const next = prev.includes(categoryId)
+				? prev.filter((x) => x !== categoryId)
+				: [...prev, categoryId]
+			persistCategoryFavoriteOrder(next)
+			return next
+		})
+	}, [])
+
 	const assignableCategoryIds = useMemo(
 		() => [
 			...REEL_CATEGORIES.map((c) => c.id),
@@ -450,6 +481,8 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 			moveUsernameToCategory,
 			sourcesModalOpen,
 			setSourcesModalOpen,
+			favoriteCategoryOrder,
+			toggleFavoriteCategory,
 		}),
 		[
 			hydrated,
@@ -473,6 +506,8 @@ export function CategoryFilterProvider({ children }: { children: ReactNode }) {
 			getCategoryLabel,
 			moveUsernameToCategory,
 			sourcesModalOpen,
+			favoriteCategoryOrder,
+			toggleFavoriteCategory,
 		],
 	)
 

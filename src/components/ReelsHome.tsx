@@ -225,6 +225,9 @@ export function ReelsHome() {
 	>(null)
 	const [headerOrganizeOpen, setHeaderOrganizeOpen] = useState(false)
 	const [selectedAccounts, setSelectedAccounts] = useState<string[]>([])
+	const [reelCountByAccount, setReelCountByAccount] = useState<
+		Record<string, number>
+	>({})
 	const categoryAutoFetchAttemptedRef = useRef<Set<string>>(new Set())
 	const queryRef = useRef(query)
 	const accountsRef = useRef(selectedAccounts)
@@ -252,14 +255,27 @@ export function ReelsHome() {
 		otherCategoryAccounts,
 	])
 
+	const headerTitle = useMemo(
+		() =>
+			selectedCategory
+				? getCategoryLabel(selectedCategory)
+				: getCategoryLabel(ALL_VIDEOS_INDEX_EDITOR_ID),
+		[selectedCategory, getCategoryLabel],
+	)
+
 	const accountUsernames = useMemo(() => {
 		if (loading || !isIndexLoaded()) return []
 		if (categoryAccounts != null) return categoryAccounts
 		return getEffectiveAccounts(ALL_VIDEOS_INDEX_EDITOR_ID)
 	}, [loading, categoryAccounts, getEffectiveAccounts, indexEpoch])
 
-	const computeSearchResults = useCallback((): MediaItem[] => {
-		if (!isIndexLoaded()) return []
+	const replaceSearchResults = useCallback(() => {
+		setVisibleCount(REELS_PAGE_INITIAL)
+		if (!isIndexLoaded()) {
+			setResults([])
+			setReelCountByAccount({})
+			return
+		}
 		const q = queryRef.current.trim() || undefined
 		const cat = selectedCategory
 			? selectedCategory === OTHER_CATEGORY_ID
@@ -267,19 +283,31 @@ export function ReelsHome() {
 				: getEffectiveAccounts(selectedCategory)
 			: getEffectiveAccounts(ALL_VIDEOS_INDEX_EDITOR_ID)
 
-		if (cat.length === 0) return []
+		if (cat.length === 0) {
+			setResults([])
+			setReelCountByAccount({})
+			return
+		}
+
+		const base = search({ q, usernames: cat })
+		const countMap = new Map<string, number>()
+		for (const item of base) {
+			const k = normalizeForSearch(item.username)
+			countMap.set(k, (countMap.get(k) ?? 0) + 1)
+		}
+		const counts: Record<string, number> = {}
+		for (const u of accountUsernames) {
+			counts[u] = countMap.get(normalizeForSearch(u)) ?? 0
+		}
+		setReelCountByAccount(counts)
+
 		const allowed = new Set(cat.map((u) => normalizeForSearch(u)))
 		const picked = accountsRef.current.filter((u) =>
 			allowed.has(normalizeForSearch(u)),
 		)
 		const usernames = picked.length > 0 ? picked : cat
-		return search({ q, usernames })
-	}, [selectedCategory, getEffectiveAccounts, otherCategoryAccounts, indexEpoch])
-
-	const replaceSearchResults = useCallback(() => {
-		setVisibleCount(REELS_PAGE_INITIAL)
-		setResults(computeSearchResults())
-	}, [computeSearchResults])
+		setResults(search({ q, usernames }))
+	}, [selectedCategory, getEffectiveAccounts, otherCategoryAccounts, accountUsernames])
 
 	const runSourcesSubmitInBackground = (payload: {
 		accounts: string[]
@@ -666,7 +694,7 @@ export function ReelsHome() {
 		return (
 			<>
 				<div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-					<ShellHeader title="Short videos" actions={headerTrailing} />
+					<ShellHeader title={headerTitle} actions={headerTrailing} />
 					<div className="flex flex-1 items-center justify-center p-4">
 						<p className="text-destructive">{error}</p>
 					</div>
@@ -680,11 +708,12 @@ export function ReelsHome() {
 	return (
 		<PlayingVideoProvider>
 			<div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-				<ShellHeader title="Short videos" actions={headerTrailing} />
+				<ShellHeader title={headerTitle} actions={headerTrailing} />
 
 				{!loading && (
 					<AccountFilterBar
 						usernames={accountUsernames}
+						counts={reelCountByAccount}
 						selected={selectedAccounts}
 						onChange={setSelectedAccounts}
 					/>

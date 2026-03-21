@@ -43,9 +43,9 @@ export async function consumeKvRateLimit(
 }
 
 /** GET /api/reels — R2 index.json okuma */
-export const R2_READ_LIMIT = 90
+export const R2_READ_LIMIT = 160
 export const R2_READ_WINDOW_SEC = 60
 
 /** POST /api/fetch-metadata — R2 + Instagram */
-export const FETCH_METADATA_LIMIT = 6
+export const FETCH_METADATA_LIMIT = 12
 export const FETCH_METADATA_WINDOW_SEC = 600
