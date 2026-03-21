@@ -55,11 +55,11 @@ export function MediaCard({ item, className }: MediaCardProps) {
 	return (
 		<Card
 			className={cn(
-				"overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md py-0 gap-3",
+				"min-h-0 w-full overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md py-0 gap-3",
 				className,
 			)}
 		>
-			<CardContent className="p-0" ref={ref}>
+			<CardContent className="min-h-0 p-0" ref={ref}>
 				{!inView ? (
 					<div
 						className={cn(

@@ -5,6 +5,7 @@ export const metadata: Metadata = {
 	title: "Kısa Videolar - Axiomism",
 	description:
 		"Axiomism Instagram kısa videoları (reels). Etiket, açıklama ve başlığa göre arayıp izleyin.",
+	referrer: "no-referrer",
 	icons: {
 		icon: "/logo.png",
 		apple: "/logo.png",
